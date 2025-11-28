@@ -91,6 +91,67 @@ export function createTrack(curve, scene) {
   scene.add(group);
 }
 
+// --- NEWS TOWER ---
+const createNewsTower = (scene) => {
+    const group = new THREE.Group();
+    // Location: 5th Ave Corridor (Moved to inside of bend)
+    const tx = -55;
+    const tz = -215;
+    group.position.set(tx, 0, tz);
+
+    const h = 45;
+    const w = 18;
+    const d = 18;
+
+    // Main Structure
+    createBox(w, h, d, '#888899', 0, h/2, 0, group);
+    
+    // Glass Strips
+    createBox(w+0.2, h-4, 4, '#113355', 0, h/2, 0, group).userData = { isLitWindow: true };
+    createBox(4, h-4, d+0.2, '#113355', 0, h/2, 0, group).userData = { isLitWindow: true };
+
+    // Roof / Helipad
+    const roofY = h + 0.5;
+    createBox(w+2, 1, d+2, '#333333', 0, roofY, 0, group); // Pad Base
+    
+    // Markings "H"
+    const markY = roofY + 0.51;
+    const markColor = '#FFFFFF';
+    createBox(1, 0.1, 8, markColor, -3, markY, 0, group); // Left leg
+    createBox(1, 0.1, 8, markColor, 3, markY, 0, group); // Right leg
+    createBox(6, 0.1, 1, markColor, 0, markY, 0, group); // Cross bar
+    
+    // Circle
+    const segs = 16;
+    const rad = 7;
+    for(let i=0; i<segs; i++) {
+        const ang = (i/segs) * Math.PI * 2;
+        const cx = Math.cos(ang) * rad;
+        const cz = Math.sin(ang) * rad;
+        createBox(1.5, 0.1, 0.5, '#FFCC00', cx, markY, cz, group).rotation.y = -ang;
+    }
+
+    // Perimeter Lights
+    const corners = [
+        {x: -w/2, z: -d/2}, {x: w/2, z: -d/2},
+        {x: w/2, z: d/2}, {x: -w/2, z: d/2}
+    ];
+    corners.forEach(c => {
+        createCylinder(0.3, 0.3, 1, 8, '#333', c.x, roofY+0.5, c.z, group);
+        const l = new THREE.PointLight(0xFF0000, 1, 10);
+        l.position.set(c.x, roofY+1.5, c.z);
+        group.add(l);
+        // Emissive bulb
+        const bulb = createBox(0.4, 0.4, 0.4, '#FF0000', c.x, roofY+1.2, c.z, group);
+        bulb.material.emissive = new THREE.Color('#FF0000');
+        bulb.material.emissiveIntensity = 2;
+    });
+
+    scene.add(group);
+    
+    return new THREE.Vector3(tx, roofY + 1.6, tz); // Return landing pos
+};
+
 // --- HELICOPTER (SkyEye-9) ---
 class NewsHelicopter {
     constructor(scene, landingPadPos, audioGenerator) {
@@ -201,15 +262,6 @@ class NewsHelicopter {
         this.gimbal.add(camSphere);
         createCylinder(0.2, 0.15, 0.3, 8, '#111', 0, 0, 0.3, this.gimbal).rotation.x = Math.PI/2;
 
-        // Lights
-        this.navGreen = new THREE.PointLight(0x00FF00, 1, 5);
-        this.navGreen.position.set(1.2, 2.0, 0);
-        body.add(this.navGreen);
-        
-        this.navRed = new THREE.PointLight(0xFF0000, 1, 5);
-        this.navRed.position.set(-1.2, 2.0, 0);
-        body.add(this.navRed);
-
         scene.add(this.group);
     }
 
@@ -242,11 +294,7 @@ class NewsHelicopter {
         this.mainRotor.rotation.y -= this.rotorSpeed * delta * 20;
         this.tailRotor.rotation.x -= this.rotorSpeed * delta * 30;
 
-        // Lights
-        const blink = Math.floor(this.timer * 4) % 2 === 0;
-        this.navGreen.intensity = blink && this.rotorSpeed > 1 ? 2 : 0;
-        this.navRed.intensity = blink && this.rotorSpeed > 1 ? 2 : 0;
-
+        // Volume logic
         if (this.sound) {
             this.sound.setVolume(Math.min(1.0, this.rotorSpeed / 5));
         }
@@ -427,67 +475,6 @@ class NewsHelicopter {
     }
 }
 
-// --- NEWS TOWER ---
-const createNewsTower = (scene) => {
-    const group = new THREE.Group();
-    // Location: 5th Ave Corridor (Moved to inside of bend)
-    const tx = -55;
-    const tz = -215;
-    group.position.set(tx, 0, tz);
-
-    const h = 45;
-    const w = 18;
-    const d = 18;
-
-    // Main Structure
-    createBox(w, h, d, '#888899', 0, h/2, 0, group);
-    
-    // Glass Strips
-    createBox(w+0.2, h-4, 4, '#113355', 0, h/2, 0, group).userData = { isLitWindow: true };
-    createBox(4, h-4, d+0.2, '#113355', 0, h/2, 0, group).userData = { isLitWindow: true };
-
-    // Roof / Helipad
-    const roofY = h + 0.5;
-    createBox(w+2, 1, d+2, '#333333', 0, roofY, 0, group); // Pad Base
-    
-    // Markings "H"
-    const markY = roofY + 0.51;
-    const markColor = '#FFFFFF';
-    createBox(1, 0.1, 8, markColor, -3, markY, 0, group); // Left leg
-    createBox(1, 0.1, 8, markColor, 3, markY, 0, group); // Right leg
-    createBox(6, 0.1, 1, markColor, 0, markY, 0, group); // Cross bar
-    
-    // Circle
-    const segs = 16;
-    const rad = 7;
-    for(let i=0; i<segs; i++) {
-        const ang = (i/segs) * Math.PI * 2;
-        const cx = Math.cos(ang) * rad;
-        const cz = Math.sin(ang) * rad;
-        createBox(1.5, 0.1, 0.5, '#FFCC00', cx, markY, cz, group).rotation.y = -ang;
-    }
-
-    // Perimeter Lights
-    const corners = [
-        {x: -w/2, z: -d/2}, {x: w/2, z: -d/2},
-        {x: w/2, z: d/2}, {x: -w/2, z: d/2}
-    ];
-    corners.forEach(c => {
-        createCylinder(0.3, 0.3, 1, 8, '#333', c.x, roofY+0.5, c.z, group);
-        const l = new THREE.PointLight(0xFF0000, 1, 10);
-        l.position.set(c.x, roofY+1.5, c.z);
-        group.add(l);
-        // Emissive bulb
-        const bulb = createBox(0.4, 0.4, 0.4, '#FF0000', c.x, roofY+1.2, c.z, group);
-        bulb.material.emissive = new THREE.Color('#FF0000');
-        bulb.material.emissiveIntensity = 2;
-    });
-
-    scene.add(group);
-    
-    return new THREE.Vector3(tx, roofY + 1.6, tz); // Return landing pos
-};
-
 // --- CAR (Alweg Style - Mid Century Modern) ---
 export function createCarMesh(type, color) {
   const group = new THREE.Group();
@@ -582,22 +569,6 @@ export function createCarMesh(type, color) {
       l2.position.set(0.8, 1.0, 1.0);
       noseGroup.add(l2);
 
-      if (isHead) {
-           const spot = new THREE.SpotLight(0xFFFFFF, 10, 80, Math.PI/6, 0.3);
-           spot.position.set(0, 2.0, 0.0);
-           spot.target.position.set(0, 0, 20);
-           spot.userData = { nightLight: true };
-           spot.visible = false; 
-           noseGroup.add(spot);
-           noseGroup.add(spot.target);
-      } else {
-           const point = new THREE.PointLight(0xFF0000, 3, 10);
-           point.position.set(0, 1.0, 1.5);
-           point.userData = { nightLight: true };
-           point.visible = false;
-           noseGroup.add(point);
-      }
-
       group.add(noseGroup);
   } else {
       createBox(1.8, 2.0, 0.4, '#222', 0, 1.5, -2.45, group);
@@ -674,50 +645,16 @@ class TrafficCar {
     const w3 = new THREE.Mesh(wheelGeo, wheelMat); w3.position.set(wOffX, wY, -1.5); w3.rotation.z = Math.PI/2; this.group.add(w3);
     const w4 = new THREE.Mesh(wheelGeo, wheelMat); w4.position.set(-wOffX, wY, -1.5); w4.rotation.z = Math.PI/2; this.group.add(w4);
 
-    const hlIntensity = 8;
-    const hlDist = 40;
-    const hlAngle = Math.PI / 5;
-    const hlPenumbra = 0.5;
-
     if (direction === -1) {
        const head = createBox(1.8, 0.2, 0.1, '#FFF', 0, 1.0, -2.26, this.group);
        head.material.emissive = new THREE.Color('#FFFFE0');
-       
-       const hl = new THREE.SpotLight(0xFFFFEE, hlIntensity, hlDist, hlAngle, hlPenumbra);
-       hl.position.set(0, 1.0, -2.3);
-       hl.target.position.set(0, 0.0, -15);
-       hl.userData = { nightLight: true };
-       hl.castShadow = false;
-       this.group.add(hl);
-       this.group.add(hl.target);
-
        const tail = createBox(1.8, 0.2, 0.1, '#F00', 0, 1.0, 2.26, this.group);
        tail.material.emissive = new THREE.Color('#AA0000');
-       
-       const tl = new THREE.PointLight(0xFF0000, 2, 5);
-       tl.position.set(0, 1.0, 2.4);
-       tl.userData = { nightLight: true };
-       this.group.add(tl);
-
     } else {
        const head = createBox(1.8, 0.2, 0.1, '#FFF', 0, 1.0, 2.26, this.group);
        head.material.emissive = new THREE.Color('#FFFFE0');
-
-       const hl = new THREE.SpotLight(0xFFFFEE, hlIntensity, hlDist, hlAngle, hlPenumbra);
-       hl.position.set(0, 1.0, 2.3);
-       hl.target.position.set(0, 0.0, 15);
-       hl.userData = { nightLight: true };
-       hl.castShadow = false;
-       this.group.add(hl);
-       this.group.add(hl.target);
-
        const tail = createBox(1.8, 0.2, 0.1, '#F00', 0, 1.0, -2.26, this.group);
        tail.material.emissive = new THREE.Color('#AA0000');
-
-       const tl = new THREE.PointLight(0xFF0000, 2, 5);
-       tl.position.set(0, 1.0, -2.4);
-       tl.userData = { nightLight: true };
-       this.group.add(tl);
     }
   }
 
@@ -825,25 +762,6 @@ export class HeroTaxi {
         const tail = createBox(1.8, 0.2, 0.1, '#F00', 0, 1.0, 2.26, this.group);
         tail.material.emissive = new THREE.Color('#AA0000');
 
-        const hlIntensity = 20;
-        const hlDist = 60;
-        const hlAngle = Math.PI / 6;
-        const hlPenumbra = 0.5;
-
-        const leftHL = new THREE.SpotLight(0xFFFFEE, hlIntensity, hlDist, hlAngle, hlPenumbra);
-        leftHL.position.set(0.6, 1.0, -2.3);
-        leftHL.target.position.set(0.6, 0.0, -10);
-        leftHL.userData = { nightLight: true };
-        this.group.add(leftHL);
-        this.group.add(leftHL.target);
-
-        const rightHL = new THREE.SpotLight(0xFFFFEE, hlIntensity, hlDist, hlAngle, hlPenumbra);
-        rightHL.position.set(-0.6, 1.0, -2.3);
-        rightHL.target.position.set(-0.6, 0.0, -10);
-        rightHL.userData = { nightLight: true };
-        this.group.add(rightHL);
-        this.group.add(rightHL.target);
-
         this.cameraRig = new THREE.Object3D();
         this.cameraRig.position.set(0, 3.0, 0.5);
         this.group.add(this.cameraRig);
@@ -930,10 +848,6 @@ const createTunnelGeometry = (scene) => {
             light.position.set(p.x, p.y + 4.5, p.z);
             light.lookAt(p.clone().add(tan));
             scene.add(light);
-
-            const pl = new THREE.PointLight('#FF9900', 100, 30);
-            pl.position.set(p.x, p.y + 4, p.z);
-            scene.add(pl);
         }
     }
 }
@@ -1323,200 +1237,200 @@ const createPacificScienceCenter = (x, z, parent) => {
     const group = new THREE.Group();
     group.position.set(x, 0, z);
     
-    // 1. FLIP ORIENTATION to match real world alignment
-    group.rotation.y = Math.PI; 
-
-    // 2. PALETTE & MATERIALS
-    const C_WHITE = '#E0E0E0'; // Realistic Seattle Concrete
-    const C_SHADOW = '#444444'; // Recessed areas
-    const C_POOL_WATER = '#20B2AA'; // Turquoise
-    
-    // --- REFLECTION POOLS ---
+    // 1. POOL (Large Blue Reflection)
     const poolW = 90;
-    const poolD = 120;
-    const waterGeo = new THREE.BoxGeometry(poolW, 0.4, poolD);
+    const poolL = 160;
+    const waterGeo = new THREE.BoxGeometry(poolW, 0.5, poolL);
     const waterMat = new THREE.MeshPhysicalMaterial({
-        color: C_POOL_WATER,
-        transmission: 0.6,
-        opacity: 0.8,
-        roughness: 0.1,
+        color: 0x00AADD,
+        roughness: 0.05,
         metalness: 0.1,
+        transmission: 0.8,
+        opacity: 0.8,
         transparent: true,
-        reflectivity: 1.0,
+        reflectivity: 1.0
     });
     const water = new THREE.Mesh(waterGeo, waterMat);
-    water.position.set(0, 0.2, 0);
+    water.position.y = 0.25;
+    water.receiveShadow = true;
     group.add(water);
     
-    // Pool Basin
-    createBox(poolW + 4, 1, poolD + 4, '#FFFFFF', 0, -0.5, 0, group);
-    
-    // Walkways
-    createBox(12, 0.6, poolD + 6, '#FFFFFF', 0, 0.5, 0, group); // Center Path
-    createBox(poolW + 6, 0.6, 12, '#FFFFFF', 0, 0.5, 0, group); // Cross Path
-    
-    // --- YAMASAKI ARCHES (HIGH FIDELITY) ---
-    // Instanced mesh for extreme detail without drag
-    const archVoxels = [];
-    const vSize = 0.25; // High Res
-    const archH = 50;
-    const archBaseW = 18;
-    
-    for(let y = 0; y <= archH; y += vSize) {
-        const t = y / archH;
-        // Gothic Taper: w = Base * (1 - t)^0.5 (Parabolic/Gothic approximation)
-        const currentW = archBaseW * Math.pow(1 - t, 0.5);
-        const thick = 2.5 * (1 - t * 0.3); // Tapers slightly
-        
-        const halfW = currentW / 2;
-        const legThickness = Math.max(0.6, currentW * 0.15);
-        
-        // Lattice Logic: Top 20%
-        const isLattice = t > 0.8;
-        
-        const addVoxel = (vx, vy, vz) => {
-            if (isLattice) {
-                // Delicate Filigree Pattern
-                const lx = Math.floor(vx/vSize);
-                const ly = Math.floor(vy/vSize);
-                if ((lx + ly) % 2 !== 0) return;
-            }
-            archVoxels.push({x: vx, y: vy, z: vz});
-        };
+    // White Pool Coping/Edge
+    createBox(poolW + 4, 1, poolL + 4, '#FFFFFF', 0, -0.5, 0, group);
+    createBox(poolW + 6, 0.2, poolL + 6, '#DDDDDD', 0, 0.1, 0, group); // Pavement base
 
-        // Legs
-        for(let x = -halfW; x <= halfW; x += vSize) {
-            // Hollow out the center, keep legs
-            const isLeg = (Math.abs(x) > halfW - legThickness) || (t > 0.95); // Solid cap
-            if (isLeg) {
-                for(let z = -thick/2; z <= thick/2; z += vSize) {
-                    addVoxel(x, y, z);
+    // 2. THE 5 SPACE GOTHIC TOWERS (Instanced)
+    const towerVoxels = [];
+    const vSize = 0.5; // High Detail
+    
+    const towerH = 50;
+    const baseWidth = 3; // Narrow waist
+    const topWidth = 24; // Wide flare
+    
+    // Generate one tower
+    for (let y = 0; y <= towerH; y += vSize) {
+        const t = y / towerH; // 0 to 1
+        
+        // Exponential Flare Function
+        // Starts straight, then flares drastically at the top
+        // y = x^3 type curve
+        const flareFactor = Math.pow(Math.max(0, t - 0.3) / 0.7, 2.5);
+        const currentW = baseWidth + (topWidth - baseWidth) * flareFactor;
+        const halfW = currentW / 2;
+        
+        const isLatticeZone = t > 0.4;
+        
+        // We build the tower from 4 corner legs that fan out
+        // Bounds for this slice
+        const limit = halfW + 0.5;
+        
+        for (let lx = -limit; lx <= limit; lx += vSize) {
+            for (let lz = -limit; lz <= limit; lz += vSize) {
+                // Check if this voxel is part of the structure
+                
+                // 1. Distance from center axis (taxicab or euclidean?)
+                // Use Max for square profile
+                const distX = Math.abs(lx);
+                const distZ = Math.abs(lz);
+                
+                // Are we on the edge of the square profile?
+                const onEdge = (distX > halfW - 0.6) || (distZ > halfW - 0.6);
+                
+                if (!onEdge) continue; // Hollow inside
+                
+                let isSolid = false;
+                
+                if (isLatticeZone) {
+                    // Create the lattice pattern (criss-cross)
+                    // Pattern: (x + y + z) % period
+                    const scale = 2.0; // Lattice size
+                    const pat = (Math.floor(lx/scale) + Math.floor(y/scale) + Math.floor(lz/scale)) % 2;
+                    
+                    // Solid rim at the very top
+                    if (t > 0.96) isSolid = true;
+                    // Corners are always solid (structural ribs)
+                    else if (distX > halfW - 0.6 && distZ > halfW - 0.6) isSolid = true;
+                    // Lattice fill on the faces
+                    else if (pat === 0) isSolid = true;
+                    
+                } else {
+                    // Base: Solid pillars at the corners
+                    // Actually, at the base, it's a tight bundle.
+                    // 4 legs
+                    if (distX > halfW - 0.8 && distZ > halfW - 0.8) isSolid = true;
+                }
+                
+                if (isSolid) {
+                    towerVoxels.push({x: lx, y: y, z: lz});
                 }
             }
         }
-        
-        // Central decorative spine ridge
-        if (t < 0.95) {
-             for(let z = -thick/2 - 0.25; z <= -thick/2; z += vSize) {
-                 addVoxel(-halfW, y, z);
-                 addVoxel(halfW, y, z);
-             }
-        }
     }
     
-    const archGeo = new THREE.BoxGeometry(vSize, vSize, vSize);
-    const archMat = new THREE.MeshStandardMaterial({color: '#FFFFFF', roughness: 0.4});
-    const archMesh = new THREE.InstancedMesh(archGeo, archMat, archVoxels.length * 5);
+    const towerGeo = new THREE.BoxGeometry(vSize, vSize, vSize);
+    const towerMat = new THREE.MeshStandardMaterial({ color: '#FFFFFF', roughness: 0.1 });
+    const towerMesh = new THREE.InstancedMesh(towerGeo, towerMat, towerVoxels.length * 5);
+    
     const dummy = new THREE.Object3D();
     let idx = 0;
     
-    for(let i=0; i<5; i++) {
-        const zOff = (i - 2) * 18;
-        archVoxels.forEach(v => {
-            if (v && typeof v.x === 'number') { // Safety check
-                dummy.position.set(v.x, v.y + 0.5, v.z + zOff);
-                dummy.updateMatrix();
-                archMesh.setMatrixAt(idx++, dummy.matrix);
-            }
+    // Instance the 5 towers
+    for (let i = 0; i < 5; i++) {
+        const zPos = (i - 2) * 30; // Spacing: -60, -30, 0, 30, 60
+        towerVoxels.forEach(v => {
+            dummy.position.set(v.x, v.y + 0.5, v.z + zPos); // +0.5 to sit on water
+            dummy.updateMatrix();
+            towerMesh.setMatrixAt(idx++, dummy.matrix);
         });
     }
-    archMesh.castShadow = true;
-    archMesh.receiveShadow = true;
-    group.add(archMesh);
+    towerMesh.castShadow = true;
+    towerMesh.receiveShadow = true;
+    group.add(towerMesh);
     
-    // --- PRE-CAST CONCRETE WALLS (VOXEL PANELS) ---
-    // Helper to create a single patterned panel
-    const createPatternedWall = (wx, wz, length, height, depth, axis) => {
-        const wGroup = new THREE.Group();
-        wGroup.position.set(wx, height/2, wz);
-        if (axis === 'z') wGroup.rotation.y = Math.PI/2;
+    // 3. FOUNTAINS (Onion Shape Wireframes)
+    const fountainVoxels = [];
+    const fSize = 0.25;
+    
+    // Parametric Onion Shape
+    // r = sin(t * PI)
+    const fHeight = 6;
+    for (let fy = 0; fy <= fHeight; fy += fSize) {
+        const t = fy / fHeight;
+        // Onion curve: Bulges at bottom, tapers to point
+        const r = 2.5 * Math.sin(t * Math.PI); 
         
-        // Base Wall
-        createBox(length, height, depth - 1, C_SHADOW, 0, 0, -0.5, wGroup);
-        
-        // Panels
-        const panelW = 6;
-        const panelCount = Math.floor(length / panelW);
-        const panelGeo = new THREE.BoxGeometry(panelW - 0.5, height - 1, 1);
-        
-        // Diamond Pattern Texture Logic
-        // In a real engine we'd use a texture, here we use geometry for "Voxel Art" style
-        // We create ONE detailed diamond panel and instance it
-        const diamondVoxels = [];
-        const dSize = 0.5;
-        const pW = panelW - 0.5;
-        const pH = height - 1;
-        
-        for(let py = -pH/2; py < pH/2; py += dSize) {
-            for(let px = -pW/2; px < pW/2; px += dSize) {
-                // Diamond shape inequality: |x|/W + |y|/H < 1
-                const nx = (px / (pW/2));
-                const ny = (py / (pH/2));
-                if (Math.abs(nx) + Math.abs(ny) < 1.0) {
-                    diamondVoxels.push({x: px, y: py, z: 0});
-                }
+        // Create ribs (8 ribs)
+        const ribs = 8;
+        for(let rIdx = 0; rIdx < ribs; rIdx++) {
+            const angle = (rIdx / ribs) * Math.PI * 2;
+            const fx = Math.cos(angle) * r;
+            const fz = Math.sin(angle) * r;
+            fountainVoxels.push({x: fx, y: fy, z: fz});
+        }
+    }
+    
+    const fGeo = new THREE.BoxGeometry(fSize, fSize, fSize);
+    const fMat = new THREE.MeshStandardMaterial({ color: '#FFFFFF', emissive: '#FFFFFF', emissiveIntensity: 0.5 });
+    // 6 fountains between towers? No, likely 4 gaps. Let's do 4 fountains.
+    const fMesh = new THREE.InstancedMesh(fGeo, fMat, fountainVoxels.length * 4);
+    idx = 0;
+    
+    for(let i=0; i<4; i++) {
+        const zPos = (i - 1.5) * 30; // Centered in the gaps
+        fountainVoxels.forEach(v => {
+            dummy.position.set(v.x, v.y + 0.5, v.z + zPos);
+            dummy.updateMatrix();
+            fMesh.setMatrixAt(idx++, dummy.matrix);
+        });
+    }
+    group.add(fMesh);
+    
+    // 4. BACKGROUND BUILDINGS (Textured Walls)
+    // Low profile, white, diagonal texture
+    const wallL = 160;
+    const wallH = 18;
+    const wallW = 4;
+    const wVoxels = [];
+    const wvSize = 1.0;
+    
+    for(let wy = 0; wy < wallH; wy += wvSize) {
+        for(let wz = -wallL/2; wz < wallL/2; wz += wvSize) {
+            // Diagonal Pattern: (y + z) % N
+            const diag = (wy + wz); 
+            // Create zig-zag depth
+            const depthMod = Math.abs(diag % 8 - 4) < 2 ? 0 : 1; 
+            
+            // Base thickness
+            for(let wx = 0; wx < wallW + depthMod; wx += wvSize) {
+                wVoxels.push({x: wx, y: wy, z: wz});
             }
         }
-        
-        const dGeo = new THREE.BoxGeometry(dSize, dSize, 2);
-        const dMat = new THREE.MeshStandardMaterial({color: C_WHITE});
-        const dMesh = new THREE.InstancedMesh(dGeo, dMat, diamondVoxels.length * panelCount);
-        
-        let dIdx = 0;
-        for(let i=0; i<panelCount; i++) {
-            const xOff = (i - panelCount/2 + 0.5) * panelW;
-            
-            // Frame
-            const frame = createBox(panelW - 0.2, height, 1.5, C_WHITE, xOff, 0, 0, wGroup);
-            
-            // Fill with diamond voxels
-            diamondVoxels.forEach(v => {
-                if (v && typeof v.x === 'number') { // Safety check
-                    dummy.position.set(v.x + xOff, v.y, 0.5); 
-                    dummy.updateMatrix();
-                    dMesh.setMatrixAt(dIdx++, dummy.matrix);
-                }
-            });
-        }
-        wGroup.add(dMesh);
-        group.add(wGroup);
-    };
+    }
     
-    // West Building
-    createPatternedWall(-55, 0, 110, 18, 12, 'z');
-    // East Building
-    createPatternedWall(55, 0, 110, 18, 12, 'z');
-    // North Block
-    createPatternedWall(0, -65, 80, 20, 20, 'x');
-
-    // --- DOMES ---
-    // Laser Dome (South/Top in flipped view)
-    const laserGroup = new THREE.Group();
-    laserGroup.position.set(0, 0, 80);
-    const laserGeo = new THREE.IcosahedronGeometry(14, 1);
-    const laserMat = new THREE.MeshStandardMaterial({color: '#FFFFFF', flatShading: true});
-    const lDome = new THREE.Mesh(laserGeo, laserMat);
-    lDome.position.y = 6;
-    laserGroup.add(lDome);
-    // Base Ring
-    createCylinder(13, 14, 4, 16, C_WHITE, 0, 2, 0, laserGroup);
-    group.add(laserGroup);
+    const wGeo = new THREE.BoxGeometry(wvSize, wvSize, wvSize);
+    const wMat = new THREE.MeshStandardMaterial({ color: '#F0F0F0', roughness: 0.6 }); // Off-white
+    const wMesh = new THREE.InstancedMesh(wGeo, wMat, wVoxels.length * 2);
     
-    // IMAX (North/Bottom in flipped view)
-    // Boeing IMAX (Curved)
-    const boeing = new THREE.Group();
-    boeing.position.set(-30, 0, -90);
-    createCylinder(18, 18, 20, 32, C_WHITE, 0, 10, 0, boeing); // Rounded drum
-    createBox(40, 4, 40, '#333333', 0, 22, 0, boeing); // Roof cap
-    group.add(boeing);
-    
-    // PACCAR IMAX (Angular)
-    const paccar = new THREE.Group();
-    paccar.position.set(30, 0, -90);
-    createBox(30, 20, 30, C_WHITE, 0, 10, 0, paccar);
-    const wedge = createBox(32, 2, 35, '#DDDDDD', 0, 21, 0, paccar);
-    wedge.rotation.x = 0.2; // Tilted roof
-    group.add(paccar);
+    idx = 0;
+    // East Wall
+    wVoxels.forEach(v => {
+        dummy.position.set(v.x + (poolW/2 + 2), v.y + 0.5, v.z);
+        dummy.rotation.set(0,0,0);
+        dummy.updateMatrix();
+        wMesh.setMatrixAt(idx++, dummy.matrix);
+    });
+    // West Wall (Mirrored position)
+    wVoxels.forEach(v => {
+        // Flip X for the voxel coord to mirror texture pattern direction if desired, 
+        // or just move position.
+        dummy.position.set(-(v.x + (poolW/2 + 2)), v.y + 0.5, v.z);
+        dummy.rotation.set(0, Math.PI, 0); // Face inward
+        dummy.updateMatrix();
+        wMesh.setMatrixAt(idx++, dummy.matrix);
+    });
+    wMesh.castShadow = true;
+    wMesh.receiveShadow = true;
+    group.add(wMesh);
 
     if (parent) parent.add(group);
 };
@@ -1552,6 +1466,7 @@ const createTunnelEntrance = (x, z, parent) => {
     parent.add(group);
 };
 
+// --- RESTORED PAVEMENT ---
 export const createFifthAvePavement = (scene) => {
     const voxels = [];
     const voxelSize = 0.5;
@@ -1696,7 +1611,6 @@ export const createFifthAvePavement = (scene) => {
     }
     
     const geometry = new THREE.BoxGeometry(voxelSize, voxelSize, voxelSize);
-    // Removed vertexColors: true to fix black rendering on instances
     const material = new THREE.MeshStandardMaterial({ roughness: 0.9 });
     const mesh = new THREE.InstancedMesh(geometry, material, voxels.length);
     
@@ -1709,7 +1623,6 @@ export const createFifthAvePavement = (scene) => {
         mesh.setColorAt(i, v.color);
     });
     
-    // Ensure colors are uploaded to GPU
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     
@@ -1719,6 +1632,7 @@ export const createFifthAvePavement = (scene) => {
     return mesh;
 };
 
+// --- MOPOP HELPERS ---
 function createSteppedLobe(scene, center, dimensions, colorHex, matParams, shapeFn, parent, exclusionFn) {
     const { w, h, d } = dimensions;
     const voxelSize = 1.25; 
@@ -1786,7 +1700,7 @@ function createSteppedLobe(scene, center, dimensions, colorHex, matParams, shape
     parent.add(mesh);
 }
 
-
+// --- SPACE NEEDLE ---
 const NEEDLE_PALETTE = {
   LEG_WHITE: '#FFFFFF',        
   CORE_CONCRETE: '#DDDDDD',    
@@ -1806,9 +1720,8 @@ const NEEDLE_PALETTE = {
   BENCH_GLASS: '#DDEEFF'
 };
 
-const DEG2RAD = Math.PI / 180;
 const rotatePoint = (x, z, angleDeg) => {
-  const rad = angleDeg * DEG2RAD;
+  const rad = angleDeg * (Math.PI / 180);
   const c = Math.cos(rad);
   const s = Math.sin(rad);
   return { x: x * c - z * s, z: x * s + z * c };
@@ -2430,6 +2343,7 @@ class SpaceNeedle {
     }
 }
 
+// --- MAIN ENVIRONMENT ---
 export function createEnvironment(scene, audioGenerator) {
   const env = new THREE.Group();
   
@@ -2562,7 +2476,7 @@ export function createEnvironment(scene, audioGenerator) {
   mopop.rotation.y = Math.PI / 4;
   mopop.updateMatrix(); 
 
-  const spotCount = 8;
+  const spotCount = 4; // Reduced from 8 to 4 for performance
   const spotRadius = 50; 
   for (let i = 0; i < spotCount; i++) {
       const angle = (i / spotCount) * Math.PI * 2;
@@ -2610,8 +2524,10 @@ export function createEnvironment(scene, audioGenerator) {
 
       for(let i=0; i<relevantTrackPoints.length; i++) {
           const p = relevantTrackPoints[i];
-          if (!p || typeof p.x === 'undefined' || typeof p.z === 'undefined') continue;
-          if (!v || typeof v.x === 'undefined' || typeof v.z === 'undefined') continue;
+          if (!p) continue;
+          
+          if (typeof p.x === 'undefined' || typeof p.z === 'undefined') continue;
+          if (typeof v.x === 'undefined' || typeof v.z === 'undefined') continue;
 
           const dx = p.x - v.x;
           const dz = p.z - v.z;
