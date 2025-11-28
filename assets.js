@@ -91,6 +91,351 @@ export function createTrack(curve, scene) {
   scene.add(group);
 }
 
+// --- HELICOPTER (SkyEye-9) ---
+class NewsHelicopter {
+    constructor(scene, landingPadPos, audioGenerator) {
+        this.group = new THREE.Group();
+        this.landingPos = landingPadPos.clone();
+        this.group.position.copy(this.landingPos);
+        
+        // State Machine
+        this.state = 'PARKED'; // PARKED, SPOOLING, TAKEOFF, PATROL, LANDING, COOLDOWN
+        this.timer = 0;
+        this.rotorSpeed = 0;
+        this.targetRotorSpeed = 0;
+        this.altitude = this.landingPos.y;
+        this.patrolAngle = 0;
+        this.patrolRadius = 80;
+        this.patrolCenter = new THREE.Vector3(0, 0, -100);
+        
+        // Audio
+        if (audioGenerator) {
+            // High pitch turbine whine
+            this.sound = audioGenerator.createPositionalAudio('ELEVATOR', 50, 500, 0.0); 
+            // Reuse elevator buffer for turbine sound, pitch shifted if possible or just volume modulated
+            if (this.sound) {
+                this.sound.setPlaybackRate(1.5); // Higher pitch for turbine
+                this.group.add(this.sound);
+            }
+        }
+
+        // --- MESH GENERATION ---
+        
+        // Fuselage (White)
+        const fuseColor = '#FFFFFF';
+        const stripeColor = '#CC0000';
+        const glassColor = '#112233';
+        const metalColor = '#333333';
+
+        const body = new THREE.Group();
+        this.group.add(body);
+        this.body = body; // Reference for tilting
+
+        // Main Cabin
+        createBox(2.2, 2.0, 3.5, fuseColor, 0, 1.5, 0.5, body);
+        // Nose (Tapered)
+        createBox(2.0, 1.8, 1.5, fuseColor, 0, 1.4, 3.0, body);
+        // Tail Boom
+        createBox(0.8, 0.8, 5.0, fuseColor, 0, 1.8, -3.5, body);
+        // Vertical Fin
+        createBox(0.2, 1.5, 1.0, fuseColor, 0, 2.5, -5.5, body).rotation.x = 0.3;
+        
+        // Red Stripe
+        createBox(2.3, 0.3, 3.6, stripeColor, 0, 1.5, 0.5, body);
+        createBox(0.9, 0.3, 5.0, stripeColor, 0, 1.8, -3.5, body);
+
+        // Cockpit Glass (Smokey)
+        const glassMat = new THREE.MeshStandardMaterial({ 
+            color: glassColor, transparent: true, opacity: 0.6, roughness: 0.1 
+        });
+        const windshield = new THREE.Mesh(new THREE.BoxGeometry(2.1, 1.2, 1.6), glassMat);
+        windshield.position.set(0, 2.0, 2.0);
+        windshield.rotation.x = -0.3;
+        body.add(windshield);
+        
+        // Pilot Silhouette
+        createBox(0.6, 0.6, 0.6, '#000000', 0, 1.8, 1.5, body);
+
+        // Skids
+        const skidGeo = new THREE.CylinderGeometry(0.1, 0.1, 5, 8);
+        const skidMat = new THREE.MeshStandardMaterial({color: metalColor});
+        const skidL = new THREE.Mesh(skidGeo, skidMat);
+        skidL.rotation.x = Math.PI/2;
+        skidL.position.set(1.0, 0.2, 0.5);
+        body.add(skidL);
+        const skidR = new THREE.Mesh(skidGeo, skidMat);
+        skidR.rotation.x = Math.PI/2;
+        skidR.position.set(-1.0, 0.2, 0.5);
+        body.add(skidR);
+        
+        // Struts
+        createBox(0.1, 1.2, 0.1, metalColor, 1.0, 0.8, 1.5, body);
+        createBox(0.1, 1.2, 0.1, metalColor, -1.0, 0.8, 1.5, body);
+        createBox(0.1, 1.2, 0.1, metalColor, 1.0, 0.8, -1.0, body);
+        createBox(0.1, 1.2, 0.1, metalColor, -1.0, 0.8, -1.0, body);
+
+        // Main Rotor
+        this.mainRotor = new THREE.Group();
+        this.mainRotor.position.set(0, 3.2, 1.0);
+        body.add(this.mainRotor);
+        createCylinder(0.2, 0.2, 0.8, 8, metalColor, 0, -0.4, 0, this.mainRotor); // Mast
+        createBox(8.0, 0.1, 0.5, '#222222', 0, 0, 0, this.mainRotor); // Blades
+        createBox(0.5, 0.1, 8.0, '#222222', 0, 0, 0, this.mainRotor); // Blades
+
+        // Tail Rotor
+        this.tailRotor = new THREE.Group();
+        this.tailRotor.position.set(0.5, 2.5, -5.5);
+        this.tailRotor.rotation.z = Math.PI/2;
+        body.add(this.tailRotor);
+        createBox(2.5, 0.1, 0.2, '#222222', 0, 0, 0, this.tailRotor);
+
+        // Gimbal Camera
+        this.gimbal = new THREE.Group();
+        this.gimbal.position.set(0, 0.5, 3.5);
+        body.add(this.gimbal);
+        const camSphere = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 8), new THREE.MeshStandardMaterial({color: '#111'}));
+        this.gimbal.add(camSphere);
+        createCylinder(0.2, 0.15, 0.3, 8, '#111', 0, 0, 0.3, this.gimbal).rotation.x = Math.PI/2;
+
+        // Lights
+        this.navGreen = new THREE.PointLight(0x00FF00, 1, 5);
+        this.navGreen.position.set(1.2, 2.0, 0);
+        body.add(this.navGreen);
+        
+        this.navRed = new THREE.PointLight(0xFF0000, 1, 5);
+        this.navRed.position.set(-1.2, 2.0, 0);
+        body.add(this.navRed);
+
+        this.spotlight = new THREE.SpotLight(0xFFFFFF, 0);
+        this.spotlight.position.set(0, 0.5, 3.5);
+        this.spotlight.angle = Math.PI / 8;
+        this.spotlight.penumbra = 0.3;
+        this.spotlight.distance = 200;
+        this.spotlight.castShadow = true;
+        this.spotlightTarget = new THREE.Object3D();
+        scene.add(this.spotlightTarget);
+        this.spotlight.target = this.spotlightTarget;
+        body.add(this.spotlight);
+
+        scene.add(this.group);
+    }
+
+    update(delta) {
+        this.timer += delta;
+
+        // Rotor Physics
+        if (this.rotorSpeed < this.targetRotorSpeed) {
+            this.rotorSpeed += delta * 10;
+        } else if (this.rotorSpeed > this.targetRotorSpeed) {
+            this.rotorSpeed -= delta * 5;
+        }
+        
+        this.mainRotor.rotation.y -= this.rotorSpeed * delta * 20;
+        this.tailRotor.rotation.x -= this.rotorSpeed * delta * 30;
+
+        // Blinking Lights (1s interval)
+        const blink = Math.floor(this.timer * 2) % 2 === 0;
+        this.navGreen.intensity = blink && this.rotorSpeed > 1 ? 2 : 0;
+        this.navRed.intensity = blink && this.rotorSpeed > 1 ? 2 : 0;
+
+        // Audio Volume
+        if (this.sound) {
+            this.sound.setVolume(Math.min(1.0, this.rotorSpeed / 5));
+        }
+
+        // State Machine
+        switch (this.state) {
+            case 'PARKED':
+                this.targetRotorSpeed = 0;
+                if (this.timer > 2) {
+                    this.state = 'SPOOLING';
+                    this.timer = 0;
+                }
+                break;
+
+            case 'SPOOLING':
+                this.targetRotorSpeed = 15;
+                // Gimbal Check
+                this.gimbal.rotation.y = Math.sin(this.timer * 3) * 0.5;
+                if (this.timer > 5) {
+                    this.state = 'TAKEOFF';
+                    this.timer = 0;
+                }
+                break;
+
+            case 'TAKEOFF':
+                // Rise to patrol height (70)
+                const takeoffDuration = 5;
+                const takeoffProgress = Math.min(1, this.timer / takeoffDuration);
+                
+                // Ease out
+                const y = this.landingPos.y + (70 - this.landingPos.y) * Math.sin(takeoffProgress * Math.PI / 2);
+                this.group.position.y = y;
+                
+                // Tilt forward slightly
+                this.body.rotation.x = THREE.MathUtils.lerp(0, 0.2, takeoffProgress);
+
+                if (takeoffProgress >= 1) {
+                    this.state = 'PATROL';
+                    this.timer = 0;
+                    this.spotlight.intensity = 10; // Turn on searchlight
+                }
+                break;
+
+            case 'PATROL':
+                const patrolDuration = 30;
+                const t = (this.timer / patrolDuration) * Math.PI * 2; // 0 to 2PI
+                
+                // Circular path
+                const r = this.patrolRadius;
+                const cx = this.patrolCenter.x;
+                const cz = this.patrolCenter.z;
+                
+                // Calculate position on circle
+                const tx = cx + Math.cos(t) * r;
+                const tz = cz + Math.sin(t) * r;
+                
+                this.group.position.x = tx;
+                this.group.position.z = tz;
+                
+                // Face forward along tangent
+                const tangentX = -Math.sin(t);
+                const tangentZ = Math.cos(t);
+                this.group.rotation.y = Math.atan2(tangentX, tangentZ);
+                
+                // Bank into turn (lean left for CCW)
+                this.body.rotation.z = 0.3; 
+                this.body.rotation.x = 0.1; // Slight forward pitch
+
+                // Spotlight Logic
+                this.spotlightTarget.position.set(tx + tangentX*20, 0, tz + tangentZ*20);
+                this.gimbal.lookAt(this.spotlightTarget.position);
+
+                if (this.timer > patrolDuration) {
+                    this.state = 'LANDING';
+                    this.timer = 0;
+                    this.spotlight.intensity = 0;
+                }
+                break;
+
+            case 'LANDING':
+                const landDuration = 10;
+                const landT = Math.min(1, this.timer / landDuration);
+                
+                // Lerp pos back to helipad
+                const currentPos = this.group.position;
+                const targetX = this.landingPos.x;
+                const targetZ = this.landingPos.z;
+                const targetY = this.landingPos.y;
+                
+                // Simple linear approach for X/Z, Ease for Y
+                // We need to capture start pos at state transition for smooth lerp, 
+                // but for simplicity we'll drift towards it
+                
+                const driftSpeed = 15 * delta;
+                const dy = (targetY - currentPos.y) * delta * 0.5; // Soft landing
+                
+                currentPos.x += (targetX - currentPos.x) * delta * 0.8;
+                currentPos.z += (targetZ - currentPos.z) * delta * 0.8;
+                
+                // Handle height
+                if (Math.abs(currentPos.x - targetX) < 5 && Math.abs(currentPos.z - targetZ) < 5) {
+                    // Close enough to descend
+                    currentPos.y += (targetY - currentPos.y) * delta * 0.8;
+                }
+
+                // Level out
+                this.body.rotation.z *= 0.95;
+                this.body.rotation.x *= 0.95;
+                this.group.lookAt(targetX, currentPos.y, targetZ + 100); // Face Northish
+
+                if (Math.abs(currentPos.y - targetY) < 0.1) {
+                    this.group.position.copy(this.landingPos);
+                    this.state = 'COOLDOWN';
+                    this.timer = 0;
+                }
+                break;
+
+            case 'COOLDOWN':
+                this.targetRotorSpeed = 0;
+                this.body.rotation.set(0,0,0);
+                if (this.rotorSpeed < 0.1) {
+                    this.state = 'PARKED';
+                    this.timer = 0;
+                }
+                break;
+        }
+    }
+    
+    getCameraTarget() {
+        const pos = this.group.position.clone();
+        const offset = new THREE.Vector3(0, 2, 8).applyEuler(this.group.rotation);
+        const look = pos.clone().add(new THREE.Vector3(0, -10, 20).applyEuler(this.group.rotation));
+        return { position: pos.add(offset), lookAt: look };
+    }
+}
+
+// --- NEWS TOWER ---
+const createNewsTower = (scene) => {
+    const group = new THREE.Group();
+    // Location: 5th Ave Corridor
+    const tx = -45;
+    const tz = -100;
+    group.position.set(tx, 0, tz);
+
+    const h = 45;
+    const w = 18;
+    const d = 18;
+
+    // Main Structure
+    createBox(w, h, d, '#888899', 0, h/2, 0, group);
+    
+    // Glass Strips
+    createBox(w+0.2, h-4, 4, '#113355', 0, h/2, 0, group).userData = { isLitWindow: true };
+    createBox(4, h-4, d+0.2, '#113355', 0, h/2, 0, group).userData = { isLitWindow: true };
+
+    // Roof / Helipad
+    const roofY = h + 0.5;
+    createBox(w+2, 1, d+2, '#333333', 0, roofY, 0, group); // Pad Base
+    
+    // Markings "H"
+    const markY = roofY + 0.51;
+    const markColor = '#FFFFFF';
+    createBox(1, 0.1, 8, markColor, -3, markY, 0, group); // Left leg
+    createBox(1, 0.1, 8, markColor, 3, markY, 0, group); // Right leg
+    createBox(6, 0.1, 1, markColor, 0, markY, 0, group); // Cross bar
+    
+    // Circle
+    const segs = 16;
+    const rad = 7;
+    for(let i=0; i<segs; i++) {
+        const ang = (i/segs) * Math.PI * 2;
+        const cx = Math.cos(ang) * rad;
+        const cz = Math.sin(ang) * rad;
+        createBox(1.5, 0.1, 0.5, '#FFCC00', cx, markY, cz, group).rotation.y = -ang;
+    }
+
+    // Perimeter Lights
+    const corners = [
+        {x: -w/2, z: -d/2}, {x: w/2, z: -d/2},
+        {x: w/2, z: d/2}, {x: -w/2, z: d/2}
+    ];
+    corners.forEach(c => {
+        createCylinder(0.3, 0.3, 1, 8, '#333', c.x, roofY+0.5, c.z, group);
+        const l = new THREE.PointLight(0xFF0000, 1, 10);
+        l.position.set(c.x, roofY+1.5, c.z);
+        group.add(l);
+        // Emissive bulb
+        const bulb = createBox(0.4, 0.4, 0.4, '#FF0000', c.x, roofY+1.2, c.z, group);
+        bulb.material.emissive = new THREE.Color('#FF0000');
+        bulb.material.emissiveIntensity = 2;
+    });
+
+    scene.add(group);
+    
+    return new THREE.Vector3(tx, roofY + 1.6, tz); // Return landing pos
+};
+
 // --- CAR (Alweg Style - Mid Century Modern) ---
 export function createCarMesh(type, color) {
   const group = new THREE.Group();
@@ -2406,6 +2751,11 @@ export function createEnvironment(scene, audioGenerator) {
   city.add(th);
   
   createTunnelEntrance(10, -225, city);
+
+  // --- NEWS TOWER & HELICOPTER ---
+  const padPos = createNewsTower(city);
+  const heli = new NewsHelicopter(city, padPos, audioGenerator);
+  animatedObjects.push(heli);
 
   env.add(city);
   
