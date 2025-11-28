@@ -74,11 +74,6 @@ export function createTrack(curve, scene) {
       const capCy = capTopY - capHeight / 2;
       const capBottomY = capTopY - capHeight;
       
-      // Calculate pillar height: Top is at (TRACK_HEIGHT + capBottomY), Bottom is at groundY
-      // Local Y of track is 0 inside pierGroup (which is at world Y=12)
-      // Top relative to pierGroup is capBottomY (-2.5)
-      // Bottom relative to pierGroup is groundY - 12
-      
       const topRel = capBottomY;
       const botRel = groundY - position.y; 
       const columnHeight = topRel - botRel;
@@ -116,84 +111,62 @@ export function createCarMesh(type, color) {
   });
   const roofMat = new THREE.MeshStandardMaterial({ color: COLORS.ROOF, roughness: 0.5 });
 
-  // --- 1. SKIRT (Undercarriage) ---
-  // Hides the wheels and hugs the beam
   const skirtGeo = new THREE.BoxGeometry(carWidth, 1.2, carLength);
   const skirt = new THREE.Mesh(skirtGeo, skirtMat);
   skirt.position.set(0, 0.4, 0); 
   group.add(skirt);
   
-  // --- 2. MAIN HULL ---
-  // Sits above skirt
   const hullGeo = new THREE.BoxGeometry(carWidth, 1.0, carLength);
   const hull = new THREE.Mesh(hullGeo, paintMat);
   hull.position.set(0, 1.5, 0); 
   group.add(hull);
 
-  // Chrome beltline strip
   const beltGeo = new THREE.BoxGeometry(carWidth + 0.05, 0.15, carLength);
   const belt = new THREE.Mesh(beltGeo, chromeMat);
   belt.position.set(0, 1.1, 0);
   group.add(belt);
 
-  // --- 3. WINDOWS ---
-  // Continuous panoramic glass strip
   const glassStripGeo = new THREE.BoxGeometry(carWidth - 0.1, 0.8, carLength - 0.2);
   const glassStrip = new THREE.Mesh(glassStripGeo, glassMat);
   glassStrip.position.set(0, 1.8, 0);
   group.add(glassStrip);
   
-  // Window Pillars (Body color)
   for(let z = -1.5; z <= 1.5; z+=1.5) {
-     const pil = createBox(carWidth, 0.8, 0.3, color, 0, 1.8, z, group);
+     createBox(carWidth, 0.8, 0.3, color, 0, 1.8, z, group);
   }
 
-  // --- 4. ROOF ---
   const roofGeo = new THREE.BoxGeometry(carWidth, 0.4, carLength);
   const roof = new THREE.Mesh(roofGeo, roofMat);
   roof.position.set(0, 2.4, 0);
   group.add(roof);
 
-  // Top vents
   createBox(1.2, 0.2, 3.0, COLORS.VENT, 0, 2.6, 0, group);
 
-  // --- 5. NOSE / TAIL SECTIONS ---
   if (isHead || isTail) {
       const noseGroup = new THREE.Group();
-      // Position at end of car
       const zOffset = isHead ? 2.25 : -2.25; 
       noseGroup.position.set(0, 0, zOffset);
       
-      if (isTail) noseGroup.rotation.y = Math.PI; // Face outwards
+      if (isTail) noseGroup.rotation.y = Math.PI; 
       
-      // A. Lower Jaw / Bumper Section
-      // Extends the skirt
       createBox(carWidth, 1.2, 1.2, '#444', 0, 0.4, 0.6, noseGroup);
       
-      // Chrome Bumper - Heavy retro styling
       const bumper = new THREE.Mesh(new THREE.BoxGeometry(carWidth + 0.2, 0.5, 0.4), chromeMat);
       bumper.position.set(0, 0.4, 1.2);
       noseGroup.add(bumper);
 
-      // B. Mid Nose (Painted) - Tapering step
       createBox(carWidth, 0.8, 1.0, color, 0, 1.4, 0.5, noseGroup);
       
-      // Chrome V-Shape or Logo on nose
       createBox(0.2, 0.6, 0.1, '#EEE', 0, 1.4, 1.01, noseGroup);
 
-      // C. Cockpit / Windshield (Sloped)
-      // We simulate the slope by rotating a glass block
       const windshield = new THREE.Mesh(new THREE.BoxGeometry(carWidth - 0.2, 1.1, 1.0), glassMat);
       windshield.position.set(0, 2.0, 0.4); 
-      windshield.rotation.x = -0.25; // 60s aerodynamic slope
+      windshield.rotation.x = -0.25; 
       noseGroup.add(windshield);
       
-      // D. Roof Cap (Overhang peak)
       const cap = createBox(carWidth, 0.3, 1.2, COLORS.ROOF, 0, 2.55, 0.1, noseGroup);
-      // Slight tilt to match window
       cap.rotation.x = -0.05;
 
-      // E. Lights
       const lightColor = isHead ? 0xFFFFEE : 0xFF0000;
       const lightEmissive = isHead ? 0xFFFFEE : 0xAA0000;
       const lightMat = new THREE.MeshStandardMaterial({
@@ -202,24 +175,22 @@ export function createCarMesh(type, color) {
           emissiveIntensity: 3.0 
       });
       
-      // Dual round lights embedded in the nose
       const l1 = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.2, 16), lightMat);
       l1.rotation.x = Math.PI/2;
-      l1.position.set(-0.8, 1.0, 1.0); // Embedded
+      l1.position.set(-0.8, 1.0, 1.0);
       noseGroup.add(l1);
 
       const l2 = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.2, 16), lightMat);
       l2.rotation.x = Math.PI/2;
-      l2.position.set(0.8, 1.0, 1.0); // Embedded
+      l2.position.set(0.8, 1.0, 1.0);
       noseGroup.add(l2);
 
-      // F. Functional Light Source (Spotlight)
       if (isHead) {
            const spot = new THREE.SpotLight(0xFFFFFF, 10, 80, Math.PI/6, 0.3);
            spot.position.set(0, 2.0, 0.0);
            spot.target.position.set(0, 0, 20);
            spot.userData = { nightLight: true };
-           spot.visible = false; // Initially hidden, toggled by index.js
+           spot.visible = false; 
            noseGroup.add(spot);
            noseGroup.add(spot.target);
       } else {
@@ -232,10 +203,7 @@ export function createCarMesh(type, color) {
 
       group.add(noseGroup);
   } else {
-      // Accordion Connector for middle cars (Between body segments)
-      // Dark rubber look
-      const accordion = createBox(1.8, 2.0, 0.4, '#222', 0, 1.5, -2.45, group);
-      // Detail ribs
+      createBox(1.8, 2.0, 0.4, '#222', 0, 1.5, -2.45, group);
       createBox(2.0, 2.1, 0.1, '#111', 0, 1.5, -2.3, group);
       createBox(2.0, 2.1, 0.1, '#111', 0, 1.5, -2.6, group);
   }
@@ -269,18 +237,6 @@ const createBench = (x, y, z, rotY=0, parent) => {
     return g;
 };
 
-const createCoffeeKiosk = (x, y, z, parent) => {
-    const g = new THREE.Group();
-    g.position.set(x, y, z);
-    createCylinder(2, 2, 2, 6, '#6F4E37', 0, 1, 0, g);
-    createCylinder(2.2, 2.2, 0.1, 6, '#FFF', 0, 2.05, 0, g);
-    createCylinder(0.2, 0.2, 2, 8, '#333', 0, 3, 0, g);
-    createCylinder(0, 2.5, 1.5, 6, '#228B22', 0, 4, 0, g);
-    createBox(0.6, 1, 0.6, '#FFF', 0, 2.5, 0, g);
-    createBox(0.4, 0.4, 0.4, '#FFCCAA', 0, 3.2, 0, g);
-    if(parent) parent.add(g);
-};
-
 const createTurnstile = (x, y, z, parent) => {
     const g = new THREE.Group();
     g.position.set(x, y, z);
@@ -298,17 +254,14 @@ class TrafficCar {
     this.speed = speed;
     this.direction = direction;
     this.zLimit = zLimit; 
-    // South end extended to 85 (tunnel), North end stays -250
     this.startZ = direction === -1 ? 85 : -250;
     
-    // Audio
     if (audioGenerator) {
-        // refDistance 40 -> Louder from orbit
         const sound = audioGenerator.createPositionalAudio('TRAFFIC', 40, 400, 0.4);
         if (sound) this.group.add(sound);
     }
 
-    const body = createBox(2.2, 1.0, 4.5, color, 0, 1.0, 0, this.group);
+    createBox(2.2, 1.0, 4.5, color, 0, 1.0, 0, this.group);
     createBox(2.0, 0.8, 2.5, '#333', 0, 1.9, -0.2, this.group); 
     createBox(2.1, 0.15, 2.6, color, 0, 2.3, -0.2, this.group); 
     
@@ -324,7 +277,6 @@ class TrafficCar {
     const w3 = new THREE.Mesh(wheelGeo, wheelMat); w3.position.set(wOffX, wY, -1.5); w3.rotation.z = Math.PI/2; this.group.add(w3);
     const w4 = new THREE.Mesh(wheelGeo, wheelMat); w4.position.set(-wOffX, wY, -1.5); w4.rotation.z = Math.PI/2; this.group.add(w4);
 
-    // Night Mode: Headlights & Taillights
     const hlIntensity = 8;
     const hlDist = 40;
     const hlAngle = Math.PI / 5;
@@ -383,30 +335,24 @@ class TrafficCar {
     const z = this.group.position.z;
     const depth = -12;
     
-    // Ramp 1: North (Battery St) Z < -140
     const rampStartN = -140;
     const rampEndN = -230;
 
-    // Ramp 2: South (Westlake) Z > 40
     const rampStartS = 40;
     const rampEndS = 80;
 
     if (z < rampStartN && z > rampEndN) {
         const t = (z - rampStartN) / (rampEndN - rampStartN);
         this.group.position.y = depth * t;
-        // North Ramp Pitch
         this.group.rotation.x = this.direction * 0.133;
     } else if (z > rampStartS && z < rampEndS) {
         const t = (z - rampStartS) / (rampEndS - rampStartS);
         this.group.position.y = depth * t;
-        // South Ramp Pitch (Opposite slope direction requires inverted pitch relative to car direction)
         this.group.rotation.x = -this.direction * 0.133;
     } else if (z <= rampEndN || z >= rampEndS) {
-        // Underground
         this.group.position.y = depth;
         this.group.rotation.x = 0;
     } else {
-        // Surface
         this.group.position.y = 0;
         this.group.rotation.x = 0;
     }
@@ -421,15 +367,13 @@ class TrafficSystem {
         const NUM_CARS = 10;
         const SPACING = 25; 
 
-        // Northbound (dir -1): Start at Z=85 (underground Westlake), go to -250 (underground Battery)
         for(let i=0; i<NUM_CARS; i++) {
-             const z = 85 - (i * SPACING); // Start deeper
+             const z = 85 - (i * SPACING); 
              const color = colors[Math.floor(Math.random() * colors.length)];
              const car = new TrafficCar(17.5, z, SPEED, -1, color, -250, audioGenerator);
              scene.add(car.group);
              this.cars.push(car);
         }
-        // Southbound (dir 1): Start at Z=-250, go to 85
         for(let i=0; i<NUM_CARS; i++) {
              const z = -250 + (i * SPACING);
              const color = colors[Math.floor(Math.random() * colors.length)];
@@ -484,7 +428,6 @@ export class HeroTaxi {
         const tail = createBox(1.8, 0.2, 0.1, '#F00', 0, 1.0, 2.26, this.group);
         tail.material.emissive = new THREE.Color('#AA0000');
 
-        // --- NIGHT LIGHTS ---
         const hlIntensity = 20;
         const hlDist = 60;
         const hlAngle = Math.PI / 6;
@@ -504,7 +447,6 @@ export class HeroTaxi {
         this.group.add(rightHL);
         this.group.add(rightHL.target);
 
-        // --- CAMERA RIG ---
         this.cameraRig = new THREE.Object3D();
         this.cameraRig.position.set(0, 3.0, 0.5);
         this.group.add(this.cameraRig);
@@ -549,11 +491,8 @@ export class HeroTaxi {
 }
 
 const createTunnelGeometry = (scene) => {
-    // Generate tunnel shell around the curve where Y < -3.0
-    // We start deeper (-3.0) to align with the tunnel entrance sign at Z = -225
     const points = TAXI_PATH.getSpacedPoints(400);
     const tunnelShape = new THREE.Shape();
-    // Inverted U shape
     const w = 6;
     const h = 5;
     tunnelShape.moveTo(-w, -2);
@@ -566,7 +505,6 @@ const createTunnelGeometry = (scene) => {
     
     if (undergroundPoints.length < 2) return;
 
-    // Create a new curve for just the underground section to extrude
     const undergroundCurve = new THREE.CatmullRomCurve3(undergroundPoints);
     
     const extrudeSettings = { steps: 100, bevelEnabled: false, extrudePath: undergroundCurve };
@@ -574,17 +512,15 @@ const createTunnelGeometry = (scene) => {
     
     const mat = new THREE.MeshStandardMaterial({ 
         color: '#444444', 
-        side: THREE.BackSide, // Important to see from inside
+        side: THREE.BackSide, 
         roughness: 0.9 
     });
     const tunnel = new THREE.Mesh(geo, mat);
     scene.add(tunnel);
 
-    // Ceiling Lights (Orange Sodium)
     const lightGeo = new THREE.BoxGeometry(2, 0.2, 4);
     const lightMat = new THREE.MeshStandardMaterial({ color: '#FF9900', emissive: '#FF9900', emissiveIntensity: 2.0 });
     
-    // Add lights every 40 units along the underground curve
     const lightCurve = undergroundCurve;
     const len = lightCurve.getLength();
     const count = Math.floor(len / 40);
@@ -605,9 +541,6 @@ const createTunnelGeometry = (scene) => {
     }
 }
 
-
-// --- BUILDING GENERATORS ---
-
 const createDetailedBrickBuilding = (x, z, floors, width, depth, color, scene) => {
     const group = new THREE.Group();
     group.position.set(x, 0, z);
@@ -624,7 +557,6 @@ const createDetailedBrickBuilding = (x, z, floors, width, depth, color, scene) =
         const frameGeo = new THREE.BoxGeometry(2.2, 2.2, depth + 0.2);
         const frameMat = new THREE.MeshStandardMaterial({ color: '#333' });
         
-        // Split windows into Dark and Lit
         const glassGeo = new THREE.BoxGeometry(1.8, 1.8, depth + 0.3);
         const glassMat = new THREE.MeshStandardMaterial({ color: '#112233', roughness: 0.2 });
         const litGlassMat = new THREE.MeshStandardMaterial({ color: '#FFFFEE', emissive: '#FFFFEE', emissiveIntensity: 0.0 });
@@ -635,7 +567,6 @@ const createDetailedBrickBuilding = (x, z, floors, width, depth, color, scene) =
         const lintelMat = new THREE.MeshStandardMaterial({ color: color });
         lintelMat.lightMapIntensity = 0.5;
 
-        // Build matrices
         const mFrame = [], mSill = [], mLintel = [], mDark = [], mLit = [];
         const dummy = new THREE.Object3D();
 
@@ -710,7 +641,6 @@ const createDetailedGlassTower = (x, z, floors, width, color, scene) => {
 
     createBox(width-4, totalHeight, width-4, '#444', 0, totalHeight/2, 0, group);
 
-    // Lit Internal Rooms
     const roomCount = Math.floor(floors * 2);
     const roomGeo = new THREE.BoxGeometry(width - 5, floorHeight - 1, width - 5);
     const roomMat = new THREE.MeshStandardMaterial({ color: '#FFFFEE', emissive: '#FFFFEE', emissiveIntensity: 0.0 });
@@ -803,9 +733,7 @@ const createStackedApartments = (x, z, scene) => {
         const bx = xOff + (Math.random() > 0.5 ? w/2 : -w/2);
         createBox(2, 1, d * 0.8, '#555', bx, y + 1, zOff, group); 
         
-        // Window Box
         const win = createBox(2, 2, 0.2, '#88CCFF', bx, y + 2, zOff + d/2 - 0.5, group);
-        // Sometimes lit
         if (Math.random() > 0.5) {
              win.material = win.material.clone();
              win.material.transparent = true;
@@ -848,11 +776,9 @@ const createArmory = (x, y, z, parent) => {
 const createMuralAmphitheater = (x, y, z, parent) => {
     const g = new THREE.Group();
     g.position.set(x, y, z);
-    g.rotation.y = -Math.PI / 3; // Align nicely with the corner of the map
+    g.rotation.y = -Math.PI / 3;
 
-    // 1. The Horiuchi Mural Wall
     const muralGroup = new THREE.Group();
-    // Move wall back slightly
     muralGroup.position.z = -15;
     g.add(muralGroup);
 
@@ -861,7 +787,6 @@ const createMuralAmphitheater = (x, y, z, parent) => {
     const segments = 20;
     const arc = Math.PI / 2.5;
     
-    // Abstract Horiuchi palette: Rust, Dark Green-Grey, Light Greys, Gold
     const colors = ['#8B2E2E', '#2F4F4F', '#A9A9A9', '#DCDCDC', '#1C1C1C', '#D4AF37']; 
 
     for(let i=0; i<=segments; i++) {
@@ -876,15 +801,12 @@ const createMuralAmphitheater = (x, y, z, parent) => {
         column.position.set(xPos, 0, zPos);
         column.rotation.y = angle;
         
-        // Backing
         createBox(segWidth, height, 2, '#999', 0, height/2, 0, column);
         
-        // Mosaic Tiles
         const numTiles = 8;
         const tileH = height / numTiles;
         for(let k=0; k<numTiles; k++) {
             const col = colors[Math.floor(Math.random() * colors.length)];
-            // Randomly offset depth for texture
             const depth = 0.5 + Math.random() * 0.5;
             createBox(segWidth * 0.95, tileH * 0.95, depth, col, 0, k*tileH + tileH/2, 1, column);
         }
@@ -892,11 +814,9 @@ const createMuralAmphitheater = (x, y, z, parent) => {
         muralGroup.add(column);
     }
     
-    // Support structure legs
     createBox(3, height, 3, '#444', -20, height/2, -5, muralGroup);
     createBox(3, height, 3, '#444', 20, height/2, -5, muralGroup);
 
-    // 2. Stage
     const stageW = 40;
     const stageD = 20;
     const stageH = 3;
@@ -904,26 +824,22 @@ const createMuralAmphitheater = (x, y, z, parent) => {
     stage.position.set(0, 0, 10);
     g.add(stage);
     
-    createBox(stageW, stageH, stageD, '#222', 0, stageH/2, 0, stage); // Base
-    createBox(stageW-2, 0.2, stageD-2, '#111', 0, stageH + 0.1, 0, stage); // Floor
+    createBox(stageW, stageH, stageD, '#222', 0, stageH/2, 0, stage);
+    createBox(stageW-2, 0.2, stageD-2, '#111', 0, stageH + 0.1, 0, stage);
     
-    // Stage Truss
     const trussColor = '#111';
     createBox(1, 16, 1, trussColor, -18, 8, -8, stage);
     createBox(1, 16, 1, trussColor, 18, 8, -8, stage);
     createBox(1, 16, 1, trussColor, -18, 8, 8, stage);
     createBox(1, 16, 1, trussColor, 18, 8, 8, stage);
-    createBox(38, 1, 18, trussColor, 0, 16, 0, stage); // Top frame
+    createBox(38, 1, 18, trussColor, 0, 16, 0, stage);
     
-    // Lights
     const lightBar = createBox(30, 0.5, 0.5, '#FFF', 0, 15.5, 8, stage);
     lightBar.material.emissive = new THREE.Color('#FFFFE0');
     lightBar.material.emissiveIntensity = 2;
 
-    // 3. Pool/Moat
-    createBox(60, 0.5, 15, '#224466', 0, 0.2, 0, g); // Under stage water hint
+    createBox(60, 0.5, 15, '#224466', 0, 0.2, 0, g);
 
-    // 4. Lawn
     const lawnGroup = new THREE.Group();
     lawnGroup.position.set(0, 0, 40);
     g.add(lawnGroup);
@@ -932,7 +848,6 @@ const createMuralAmphitheater = (x, y, z, parent) => {
     const lawnL = 80;
     const slope = -0.15;
     
-    // Create stepped grass for voxel feel instead of smooth plane
     const steps = 20;
     const stepL = lawnL / steps;
     const stepH = (Math.tan(Math.abs(slope)) * lawnL) / steps;
@@ -942,14 +857,12 @@ const createMuralAmphitheater = (x, y, z, parent) => {
         const zPos = i * stepL;
         const grass = createBox(lawnW, stepH + 1, stepL + 0.5, '#3A5F0B', 0, yPos, zPos, lawnGroup);
         
-        // Random Audience
         if (Math.random() > 0.6) {
              const px = (Math.random() - 0.5) * (lawnW - 5);
              createBox(1.5, 1.5, 1.5, colors[Math.floor(Math.random()*colors.length)], px, yPos + stepH/2 + 0.75, zPos, lawnGroup);
         }
     }
     
-    // Side concrete walls for lawn
     const wallL = Math.sqrt(lawnL*lawnL + (lawnL*Math.tan(Math.abs(slope)))**2);
     const wallLeft = createBox(2, 4, wallL, '#888', -lawnW/2 - 1, (steps*stepH)/2, lawnL/2, lawnGroup);
     wallLeft.rotation.x = slope;
@@ -1019,9 +932,7 @@ const createTunnelEntrance = (x, z, parent) => {
     createBox(4, h, d, '#555', w/2 - 2, h/2, 0, group);
     createBox(w, 4, d, '#555', 0, h - 2, 0, group);
     
-    // Shortened sign width from 22 to 15 to avoid track collision
     createBox(15, 2.5, 1, '#1a472a', 0, h + 1.25, d/2, group); 
-    // Shortened strip width from 18 to 12
     createBox(12, 0.4, 1.2, '#DDD', 0, h + 1.25, d/2, group); 
     
     createBox(w - 8, h - 4, 40, '#050505', 0, (h-4)/2, -20, group);
@@ -1042,150 +953,155 @@ const createTunnelEntrance = (x, z, parent) => {
     parent.add(group);
 };
 
-const createFifthAvePavement = (scene) => {
+export const createFifthAvePavement = (scene) => {
     const voxels = [];
     const voxelSize = 0.5;
     
-    // Color Palette
-    const C_ASPHALT = new THREE.Color('#333333');
-    const C_ASPHALT_DARK = new THREE.Color('#2a2a2a');
-    const C_ASPHALT_PATCH = new THREE.Color('#3a3a3a');
-    const C_MARKING_WHITE = new THREE.Color('#EEEEEE');
-    const C_MARKING_YELLOW = new THREE.Color('#FFD700');
-    const C_CONCRETE = new THREE.Color('#AAAAAA');
-    const C_CONCRETE_LIGHT = new THREE.Color('#CCCCCC');
-    const C_PAVER_DARK = new THREE.Color('#999999');
-    const C_CURB = new THREE.Color('#999999');
-    const C_GRASS = new THREE.Color('#3A5F0B');
+    // Updated High-Contrast Palette
+    const C_ASPHALT_BASE = new THREE.Color('#252525');
+    const C_ASPHALT_NOISE = new THREE.Color('#2A2A2A');
+    const C_MARKING_WHITE = new THREE.Color('#FFFFFF'); 
+    const C_MARKING_YELLOW = new THREE.Color('#FFC000'); 
+    const C_SIDEWALK_BASE = new THREE.Color('#AAAAAA');
+    const C_SIDEWALK_LIGHT = new THREE.Color('#BBBBBB');
+    const C_SIDEWALK_DARK = new THREE.Color('#999999');
+    const C_CURB = new THREE.Color('#888888');
+    const C_CURB_RED = new THREE.Color('#CC2222');
+    const C_PLANTER_WALL = new THREE.Color('#8B4513'); 
+    const C_SOIL = new THREE.Color('#3d2817');
+    const C_GRASS = new THREE.Color('#448844');
+    const C_METAL_GRATE = new THREE.Color('#111111');
+    const C_MANHOLE = new THREE.Color('#3E2723'); 
 
-    // Helper to add voxel
     const addVoxel = (x, y, z, color) => {
         voxels.push({x, y, z, color});
     };
 
-    // Bounds matching the gap in ground planes
     const minX = -10;
     const maxX = 30;
     const minZ = -230;
-    // Extended maxZ to 100 to cover the Westlake tunnel ramp
     const maxZ = 100;
 
+    const roadMinX = -2;
+    const roadMaxX = 22;
+
     for (let z = maxZ; z >= minZ; z -= voxelSize) {
-        // Ramp Logic: The road dips down to form the tunnel entrance
         let ySurface = 0;
         let isRamp = false;
 
         if (z < -140) {
             isRamp = true;
-            // Ramp goes from Z=-140 (Y=0) to Z=-230 (Y approx -12)
-            const rampLen = -230 - (-140); // -90
-            const dist = z - (-140); // negative
-            const t = dist / rampLen; // 0 to 1
+            const rampLen = -230 - (-140); 
+            const dist = z - (-140);
+            const t = dist / rampLen;
             ySurface = -12 * t; 
         } else if (z > 40) {
              isRamp = true;
-             // South Ramp (Westlake): z > 40. Goes down to z=80 (approx)
              const rampLen = 80 - 40;
              const dist = z - 40;
              const t = Math.min(1, dist / rampLen);
              ySurface = -12 * t;
         }
 
+        const sidewalkH = 0.25;
+
         for (let x = minX; x <= maxX; x += voxelSize) {
-            let color = null;
-            let y = ySurface;
+            const isRoad = (x >= roadMinX && x <= roadMaxX);
+            const isLeftSidewalk = (x < roadMinX);
+            const isRightSidewalk = (x > roadMaxX);
             
-            // Areas definition (Road width 24 units: -2 to 22)
-            const isRoad = (x >= -2 && x <= 22);
-            const isLeftSidewalk = (x >= -10 && x < -2);
-            const isRightSidewalk = (x > 22 && x <= 30);
+            let yBase = ySurface;
+            
+            if (isRamp && !isRoad) yBase = 0; 
 
-            if (isRamp) {
-                // In the ramp zone, road follows slope, sidewalks stay up to form walls
-                if (!isRoad) y = 0; 
-            }
+            if (isRoad) {
+                let col = ((Math.floor(x*2) + Math.floor(z*2)) % 7 === 0) ? C_ASPHALT_NOISE : C_ASPHALT_BASE;
 
-            // Sidewalks are raised
-            if (y === 0 && (isLeftSidewalk || isRightSidewalk)) {
-                y = 0.25; 
-            }
-
-            // Determine Color
-            if (isLeftSidewalk || isRightSidewalk) {
-                 // Paver Pattern (Checkerboard on 1m grid)
-                 const vx = Math.floor(x * 2); 
-                 const vz = Math.floor(z * 2);
-                 if ((vx + vz) % 2 === 0) color = C_CONCRETE_LIGHT;
-                 else color = C_PAVER_DARK;
-                 
-                 // Curb edge
-                 if (Math.abs(x - (-2)) < 0.5 || Math.abs(x - 22) < 0.5) color = C_CURB;
-                 
-                 // Planters with grass (Periodic along Z)
-                 if (Math.abs(z % 25) < 2.5) {
-                     // Left planter or Right planter
-                     if ((Math.abs(x - (-6)) < 1.5) || (Math.abs(x - 26) < 1.5)) color = C_GRASS;
-                 }
-            }
-            else if (isRoad) {
-                // Asphalt Base Pattern
-                 const n = Math.sin(x * 0.5) * Math.cos(z * 0.5);
-                 if (n > 0.5) color = C_ASPHALT_PATCH;
-                 else if (n < -0.5) color = C_ASPHALT_DARK;
-                 else color = C_ASPHALT;
-
-                 // --- MARKINGS ---
-                 // 1. Double Yellow Center Line (Around x=10)
-                 // Two lines at x=9.8 and x=10.2, separated by gap
-                 if (Math.abs(x - 9.7) < 0.2 || Math.abs(x - 10.3) < 0.2) {
-                     color = C_MARKING_YELLOW;
-                 }
-
-                 // 2. Dashed White Lane Dividers (Three lanes per direction roughly)
-                 // Left side lanes: x=4, Right side lanes: x=16
-                 if (Math.abs(x - 4) < 0.2 || Math.abs(x - 16) < 0.2) {
-                     if (Math.abs(z % 10) < 3) color = C_MARKING_WHITE;
-                 }
-
-                 // 3. Solid White Shoulder Lines (Near curbs x=-1.5 and x=21.5)
-                 if (Math.abs(x - (-1.5)) < 0.2 || Math.abs(x - 21.5) < 0.2) {
-                     color = C_MARKING_WHITE;
-                 }
-
-                 // 4. Crosswalks (Zebra Stripes) every 40 units
-                 if (Math.abs(z % 40) < 3) {
-                     // Stripe pattern across X
-                     if (Math.floor(x) % 2 === 0) color = C_MARKING_WHITE;
-                 }
-                 
-                 // 5. Stop Bars (Solid line before crosswalk)
-                 if (Math.abs(z % 40 - 4) < 0.5) {
-                     color = C_MARKING_WHITE;
-                 }
-            }
-
-            // Retaining Wall Filling for Ramp
-            // If we are in the ramp area, and at the edge of the sidewalk, fill down to road level
-            if (isRamp && (Math.abs(x - (-2)) < 0.5 || Math.abs(x - 22) < 0.5)) {
-                // Fill vertically from top (0) down to ySurface
-                for (let wy = -voxelSize; wy > ySurface; wy -= voxelSize) {
-                    addVoxel(x, wy, z, C_CONCRETE_LIGHT);
+                if (Math.abs(x - 9.5) < 0.1 || Math.abs(x - 10.5) < 0.1) {
+                    col = C_MARKING_YELLOW;
                 }
+                
+                const isDividerX = (Math.abs(x - 2.0) < 0.1 || Math.abs(x - 6.0) < 0.1 || Math.abs(x - 14.0) < 0.1 || Math.abs(x - 18.0) < 0.1);
+                if (isDividerX && Math.abs(z % 12) < 3) col = C_MARKING_WHITE;
+
+                const cwZ = Math.abs(z % 40); 
+                if (Math.abs(cwZ - 6) < 0.4) col = C_MARKING_WHITE; 
+
+                if (cwZ < 3.0) {
+                    if (Math.floor(x) % 2 === 0) col = C_MARKING_WHITE;
+                }
+                
+                if (Math.abs(z % 50) < 1.0) {
+                    if (Math.abs(x - 4) < 0.6 || Math.abs(x - 16) < 0.6) col = C_MANHOLE;
+                }
+
+                if (Math.abs(z % 20) < 1.0) {
+                    if (Math.abs(x - roadMinX) < 1.0 || Math.abs(x - roadMaxX) < 1.0) col = C_METAL_GRATE;
+                }
+
+                addVoxel(x, yBase, z, col);
             }
-            
-            if (color) {
-                addVoxel(x, y, z, color);
+
+            if (isLeftSidewalk || isRightSidewalk) {
+                let ySidewalk = yBase + sidewalkH;
+                
+                const isEdge = (isLeftSidewalk && x >= roadMinX - 0.5) || (isRightSidewalk && x <= roadMaxX + 0.5);
+                
+                if (isEdge && yBase > ySurface + 0.5) { 
+                    for (let fy = yBase - voxelSize; fy > ySurface; fy -= voxelSize) {
+                        addVoxel(x, fy, z, C_SIDEWALK_DARK);
+                    }
+                }
+
+                const isCurb = (isLeftSidewalk && x >= roadMinX - 0.5) || (isRightSidewalk && x <= roadMaxX + 0.5);
+                
+                if (isCurb) {
+                    let curbCol = C_CURB;
+                    if (Math.abs(z % 40) < 8) curbCol = C_CURB_RED;
+                    addVoxel(x, ySidewalk, z, curbCol);
+                } else {
+                    const tx = Math.floor(x);
+                    const tz = Math.floor(z);
+                    let tileCol = ((tx + tz) % 2 === 0) ? C_SIDEWALK_BASE : C_SIDEWALK_LIGHT;
+                    
+                    const sidewalkCenter = isLeftSidewalk ? -6 : 26;
+                    const planterZ = z % 25;
+                    
+                    const inPlanterZone = (Math.abs(planterZ) < 2.5 && Math.abs(x - sidewalkCenter) < 1.5);
+                    
+                    if (inPlanterZone) {
+                        const isWall = (Math.abs(planterZ) > 2.0 || Math.abs(x - sidewalkCenter) > 1.0);
+                        
+                        if (isWall) {
+                            addVoxel(x, ySidewalk, z, C_PLANTER_WALL); 
+                            addVoxel(x, ySidewalk + voxelSize, z, C_PLANTER_WALL); 
+                        } else {
+                            addVoxel(x, ySidewalk, z, C_PLANTER_WALL); 
+                            addVoxel(x, ySidewalk + voxelSize, z, C_SOIL); 
+                            addVoxel(x, ySidewalk + voxelSize*1.5, z, C_GRASS); 
+                            
+                            if (Math.random() > 0.8) {
+                                 addVoxel(x, ySidewalk + voxelSize*2.5, z, new THREE.Color('#33AA33'));
+                            }
+                        }
+                    } else {
+                        addVoxel(x, ySidewalk, z, tileCol);
+                        
+                        if (Math.abs((z+12.5) % 25) < 0.5 && Math.abs(x - sidewalkCenter) < 0.5) {
+                             addVoxel(x, ySidewalk + voxelSize, z, C_SIDEWALK_DARK);
+                        }
+                    }
+                }
             }
         }
     }
     
-    // Create Instanced Mesh
     const geometry = new THREE.BoxGeometry(voxelSize, voxelSize, voxelSize);
-    const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 });
+    // Removed vertexColors: true to fix black rendering on instances
+    const material = new THREE.MeshStandardMaterial({ roughness: 0.9 });
     const mesh = new THREE.InstancedMesh(geometry, material, voxels.length);
     
     const dummy = new THREE.Object3D();
-    const _color = new THREE.Color();
     
     voxels.forEach((v, i) => {
         dummy.position.set(v.x, v.y, v.z);
@@ -1193,6 +1109,10 @@ const createFifthAvePavement = (scene) => {
         mesh.setMatrixAt(i, dummy.matrix);
         mesh.setColorAt(i, v.color);
     });
+    
+    // Ensure colors are uploaded to GPU
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     
     mesh.receiveShadow = true;
     mesh.castShadow = true;
@@ -1214,7 +1134,6 @@ function createSteppedLobe(scene, center, dimensions, colorHex, matParams, shape
                 let nz = z / d;
                 
                 if (shapeFn(nx, ny, nz)) {
-                    // Exclusion Check
                     const vx = center.x + x;
                     const vy = center.y + y;
                     const vz = center.z + z;
@@ -1273,16 +1192,16 @@ const NEEDLE_PALETTE = {
   LEG_WHITE: '#FFFFFF',        
   CORE_CONCRETE: '#DDDDDD',    
   GLASS_BLUE: '#AACCFF',       
-  GALAXY_GOLD: '#FF9900', // Galaxy Gold is actually Orange
+  GALAXY_GOLD: '#FF9900', 
   WARNING_RED: '#FF3333',      
   DARK_STEEL: '#444444',       
   ELEVATOR_RED: '#D03030',
   ELEVATOR_YELLOW: '#F0C000',
   ELEVATOR_BLUE: '#3060D0',
-  INTERIOR_FLOOR: '#222222', // Dark modern carpet
-  INTERIOR_WALL: '#EEEEEE',  // Clean core walls
-  FURNITURE_WOOD: '#8B5A2B', // Warm wood accents
-  KIOSK_SCREEN: '#00AAFF',   // Info screens
+  INTERIOR_FLOOR: '#222222', 
+  INTERIOR_WALL: '#EEEEEE',  
+  FURNITURE_WOOD: '#8B5A2B', 
+  KIOSK_SCREEN: '#00AAFF',   
   GLASS_FLOOR: '#99CCFF',
   GLASS_BARRIER: '#E0F5FF',
   BENCH_GLASS: '#DDEEFF'
@@ -1300,7 +1219,7 @@ const generateNeedleVoxels = () => {
   const solidVoxels = [];
   const glassVoxels = [];
   const rotatingVoxels = [];
-  const rotatingGlassVoxels = []; // New array for rotating glass
+  const rotatingGlassVoxels = [];
 
   const add = (x, y, z, color, type = 'solid') => {
     const v = { x: Math.round(x), y: Math.round(y), z: Math.round(z), color };
@@ -1326,12 +1245,11 @@ const generateNeedleVoxels = () => {
   const LEVEL_SKYLINE = 80;
   const LEVEL_WAIST = 300;
   const LEVEL_SOFFIT_START = 400;
-  const LEVEL_LOUPE_FLOOR = 415; // Lower level
-  const LEVEL_OPEN_DECK_FLOOR = 428; // Upper level
+  const LEVEL_LOUPE_FLOOR = 415; 
+  const LEVEL_OPEN_DECK_FLOOR = 428; 
   const LEVEL_ROOF_BRIM = 442;
   const LEVEL_ROOF_PEAK = 460;
   
-  // -- LEGS AND WAIST (Keep as is) --
   for (let y = -40; y <= 0; y++) {
     const t = (y + 40) / 40; 
     const r = 80 * (1 - t * 0.5); 
@@ -1446,7 +1364,6 @@ const generateNeedleVoxels = () => {
       add(p.x, LEVEL_SOFFIT_START, p.z, NEEDLE_PALETTE.LEG_WHITE);
   }
 
-  // -- SOFFIT CURVE --
   for (let y = LEVEL_SOFFIT_START; y < LEVEL_LOUPE_FLOOR; y++) {
     const t = (y - LEVEL_SOFFIT_START) / (LEVEL_LOUPE_FLOOR - LEVEL_SOFFIT_START); 
     const rOuter = 50 + (t * 30); 
@@ -1466,35 +1383,28 @@ const generateNeedleVoxels = () => {
     }
   }
 
-  // -- THE LOUPE (LOWER LEVEL) --
-  // Rotating Glass Floor & Floor-to-Ceiling Glass Walls
   for (let y = LEVEL_LOUPE_FLOOR; y < LEVEL_OPEN_DECK_FLOOR; y++) {
       const isFloor = y === LEVEL_LOUPE_FLOOR;
       const isCeiling = y === LEVEL_OPEN_DECK_FLOOR - 1;
       
-      // -- FLOOR --
       if (isFloor) {
-          // 1. Stationary Core (Carpet/Concrete)
           for (let r=10; r<60; r+=2) {
              for (let d=0; d<360; d+=2) {
                  const p = rotatePoint(r, 0, d);
                  add(p.x, y, p.z, NEEDLE_PALETTE.INTERIOR_FLOOR);
              }
           }
-          // 2. The Loupe (Rotating Glass Floor)
           for (let r=60; r<78; r+=1) {
              for (let d=0; d<360; d+=1) {
                  const p = rotatePoint(r, 0, d);
-                 // Radial lines to emphasize rotation
                  const isRib = d % 15 === 0;
                  if (isRib) {
-                     add(p.x, y, p.z, '#FFFFFF', 'rotating'); // Solid rib - White for contrast
+                     add(p.x, y, p.z, '#FFFFFF', 'rotating'); 
                  } else {
                      add(p.x, y, p.z, NEEDLE_PALETTE.GLASS_FLOOR, 'rotatingGlass');
                  }
              }
           }
-          // 3. Stationary Outer Rim
           for (let r=78; r<80; r+=1) {
              for (let d=0; d<360; d+=2) {
                  const p = rotatePoint(r, 0, d);
@@ -1503,7 +1413,6 @@ const generateNeedleVoxels = () => {
           }
       }
 
-      // -- CEILING (To block light leakage) --
       if (isCeiling) {
           for (let r=10; r<80; r+=2) {
              for (let d=0; d<360; d+=2) {
@@ -1513,17 +1422,14 @@ const generateNeedleVoxels = () => {
           }
       }
 
-      // -- INTERIOR KIOSKS & FURNITURE --
-      // Stationary Inner Ring (r < 60)
       if (y >= LEVEL_LOUPE_FLOOR + 1 && y <= LEVEL_LOUPE_FLOOR + 4) {
-          // Central Core Walls with gaps for elevators
           const elevatorAngles = [60, 180, 300];
           for (let d=0; d<360; d+=2) {
              let isDoorway = false;
              for(let ang of elevatorAngles) {
                  let diff = Math.abs(d - ang);
                  if (diff > 180) diff = 360 - diff;
-                 if (diff < 9) { // +/- 9 degrees gap for elevator doors
+                 if (diff < 9) { 
                      isDoorway = true;
                      break;
                  }
@@ -1535,16 +1441,13 @@ const generateNeedleVoxels = () => {
              }
           }
 
-          // Information Kiosks (every 60 degrees)
           for (let k=0; k<6; k++) {
               const angle = k * 60 + 15;
               const rKiosk = 45;
-              // Main Body
               for (let w=-2; w<=2; w++) {
                   const p = rotatePoint(rKiosk + w, 0, angle);
                   add(p.x, y, p.z, NEEDLE_PALETTE.KIOSK_SCREEN);
               }
-              // Wooden Counter
               if (y === LEVEL_LOUPE_FLOOR + 1) {
                    const p = rotatePoint(rKiosk, 0, angle);
                    add(p.x, y, p.z, NEEDLE_PALETTE.FURNITURE_WOOD);
@@ -1552,18 +1455,14 @@ const generateNeedleVoxels = () => {
           }
       }
 
-      // -- EXTERIOR WALLS --
-      // Slight outward slope
       const t = (y - LEVEL_LOUPE_FLOOR) / (LEVEL_OPEN_DECK_FLOOR - LEVEL_LOUPE_FLOOR);
-      const r = 80 + t * 4; // 80 -> 84
+      const r = 80 + t * 4; 
 
-      // Glass Curtain Wall
       for (let d=0; d<360; d+=0.6) {
           const p = rotatePoint(r, 0, d);
           add(p.x, y, p.z, NEEDLE_PALETTE.GLASS_BLUE, 'glass');
       }
       
-      // Structural Mullions
       if (y % 6 === 0) {
          for (let d=0; d<360; d+=15) {
              const p = rotatePoint(r-1, 0, d);
@@ -1572,26 +1471,21 @@ const generateNeedleVoxels = () => {
       }
   }
 
-  // -- OUTDOOR OBSERVATION DECK (UPPER LEVEL) --
-  // Open Air, Angled Glass Barriers, Glass Benches
   for (let y = LEVEL_OPEN_DECK_FLOOR; y < LEVEL_ROOF_BRIM; y++) {
       const isFloor = y === LEVEL_OPEN_DECK_FLOOR;
 
-      // -- FLOOR --
       if (isFloor) {
           for (let r=12; r<84; r+=2) {
              for (let d=0; d<360; d+=2) {
                  const p = rotatePoint(r, 0, d);
-                 add(p.x, y, p.z, '#BBBBBB'); // Concrete deck
+                 add(p.x, y, p.z, '#BBBBBB'); 
              }
           }
       }
 
-      // -- INTERIOR BENCHES (Stationary) --
       if (y >= LEVEL_OPEN_DECK_FLOOR + 1 && y <= LEVEL_OPEN_DECK_FLOOR + 2) {
           for (let b=0; b<12; b++) {
               const angle = b * 30;
-              // Wooden Benches facing out
               const rBench = 75;
               for(let w=-2; w<=2; w++) {
                  const p = rotatePoint(rBench, w, angle);
@@ -1600,23 +1494,17 @@ const generateNeedleVoxels = () => {
           }
       }
 
-      // -- LEANING GLASS BARRIER --
-      // Leans outward significantly: 84 -> 92
       const t = (y - LEVEL_OPEN_DECK_FLOOR) / (LEVEL_ROOF_BRIM - LEVEL_OPEN_DECK_FLOOR);
       const r = 84 + t * 8;
 
-      // Barrier Wall
       for (let d=0; d<360; d+=0.6) {
           const p = rotatePoint(r, 0, d);
           add(p.x, y, p.z, NEEDLE_PALETTE.GLASS_BARRIER, 'glass');
       }
 
-      // -- GLASS BENCHES (Skyrisers) --
-      // Leaning glass benches near the bottom of the wall
       if (y >= LEVEL_OPEN_DECK_FLOOR && y <= LEVEL_OPEN_DECK_FLOOR + 3) {
           const benchR = r - 1.5;
           for (let d=0; d<360; d+=1) {
-              // Intermittent benches
               if (d % 20 < 12) {
                   const p = rotatePoint(benchR, 0, d);
                   add(p.x, y, p.z, NEEDLE_PALETTE.BENCH_GLASS, 'glass');
@@ -1624,7 +1512,6 @@ const generateNeedleVoxels = () => {
           }
       }
 
-      // -- TOP RAIL --
       if (y === LEVEL_ROOF_BRIM - 1) {
            for (let d=0; d<360; d+=1) {
                const p = rotatePoint(r, 0, d);
@@ -1633,10 +1520,9 @@ const generateNeedleVoxels = () => {
       }
   }
 
-  // -- ROOF --
   for (let y = LEVEL_ROOF_BRIM; y < LEVEL_ROOF_BRIM + 5; y++) {
       const t = (y - LEVEL_ROOF_BRIM) / 5;
-      const r = 92 * (1 - t * 0.3); // Starts at 92, shrinks
+      const r = 92 * (1 - t * 0.3); 
       for (let d = 0; d < 360; d+=1) {
           const p = rotatePoint(r, 0, d);
           add(p.x, y, p.z, NEEDLE_PALETTE.GALAXY_GOLD);
@@ -1721,7 +1607,6 @@ class Elevator {
 
       this.group = new THREE.Group();
       if (audioGenerator) {
-          // refDistance 20 -> Audible in city
           const sound = audioGenerator.createPositionalAudio('ELEVATOR', 20, 300, 0.5);
           if (sound) this.group.add(sound);
       }
@@ -1730,9 +1615,6 @@ class Elevator {
       this.soundDummy = new THREE.Object3D();
       this.group.add(this.soundDummy);
 
-      // Create a dedicated group for the moving elevator car
-      // This allows us to move the whole car by changing .position.y
-      // instead of updating the InstancedMesh matrix every frame.
       this.carGroup = new THREE.Group();
       this.group.add(this.carGroup);
 
@@ -1746,41 +1628,34 @@ class Elevator {
       for (let dy = 0; dy < 6; dy++) {
         for (let dx = -1; dx <= 1; dx++) {
           for (let dz = -1; dz <= 1; dz++) {
-            // Logic for Elevator Shape
-            // dx=1: Outer Face (Glass), dx=-1: Inner Face (Door/Solid)
             const pLocal = rotatePoint(11 + dx, dz, angle);
             
             let type = 'solid';
             let vColor = cBody;
 
-            if (dy === 0) { // Floor
+            if (dy === 0) { 
                 type = 'solid'; vColor = cFloor;
-            } else if (dy === 5) { // Ceiling
+            } else if (dy === 5) { 
                 type = 'solid'; vColor = cBody;
             } else {
-                // Middle section
-                if (dx === 1) { // Outer Face
+                if (dx === 1) { 
                     type = 'glass';
-                } else if (dx === 0) { // Middle Slice
+                } else if (dx === 0) { 
                     if (dz === 0) {
-                        type = 'empty'; // Interior
+                        type = 'empty'; 
                     } else {
-                        type = 'glass'; // Side Windows
+                        type = 'glass'; 
                     }
-                } else { // Inner Face (dx = -1)
+                } else { 
                     if (dz === 0) {
-                        type = 'solid'; vColor = cDoor; // Door
+                        type = 'solid'; vColor = cDoor; 
                     } else {
-                        type = 'solid'; vColor = cBody; // Corner columns
+                        type = 'solid'; vColor = cBody; 
                     }
                 }
             }
 
             if (type !== 'empty') {
-                // Note: We use pLocal.x/z but dy is local Y. 
-                // We add to voxels with local coordinates.
-                // The actual elevator car rotation is handled by voxel placement relative to center 
-                // but since we want to move it up/down, we build it at y=dy relative to carGroup.
                 const v = { x: pLocal.x, y: dy, z: pLocal.z, color: vColor };
                 if (type === 'glass') this.glassVoxels.push(v);
                 else this.solidVoxels.push(v);
@@ -1790,7 +1665,6 @@ class Elevator {
       }
 
       const geo = new THREE.BoxGeometry(1, 1, 1);
-      // Use White material to allow instance colors to work correctly
       const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5, metalness: 0.5 });
       this.mesh = new THREE.InstancedMesh(geo, mat, this.solidVoxels.length);
       
@@ -1801,7 +1675,6 @@ class Elevator {
           this.mesh.setMatrixAt(i, dummy.matrix);
           this.mesh.setColorAt(i, v.color);
       });
-      // Set update flag once
       this.mesh.instanceMatrix.needsUpdate = true;
       if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
       this.carGroup.add(this.mesh);
@@ -1849,10 +1722,8 @@ class Elevator {
          }
       }
 
-      // Update the Group position instead of every voxel matrix
       this.carGroup.position.y = s.y;
 
-      // Update Sound
       const p = rotatePoint(11, 0, this.angle);
       this.soundDummy.position.set(p.x, s.y + 3, p.z);
   }
@@ -1891,6 +1762,8 @@ class SpaceNeedle {
                     mesh.setColorAt(i, color);
                 }
             });
+            mesh.instanceMatrix.needsUpdate = true;
+            if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
             mesh.castShadow = true;
             mesh.receiveShadow = true;
             return mesh;
@@ -1899,11 +1772,10 @@ class SpaceNeedle {
         this.solidMesh = createIM(data.solid, { roughness: 0.8, metalness: 0.2 });
         this.group.add(this.solidMesh);
 
-        // Updated Glass Material
         this.glassMesh = createIM(data.glass, { 
             color: '#FFFFFF', 
             transparent: true, 
-            opacity: 0.15, // Very see-through
+            opacity: 0.15, 
             roughness: 0.0, 
             metalness: 0.9,
             side: THREE.DoubleSide
@@ -1912,12 +1784,9 @@ class SpaceNeedle {
 
         this.rotatingGroup = new THREE.Group();
         
-        // Solid Rotating Parts (Ribs etc)
         this.rotatingMesh = createIM(data.rotating, { roughness: 0.8, metalness: 0.1 });
         this.rotatingGroup.add(this.rotatingMesh);
         
-        // Rotating Glass Floor (The Loupe)
-        // Use transparent material, slightly higher opacity/roughness than walls
         this.rotatingGlassMesh = createIM(data.rotatingGlass, { 
             color: '#AACCFF', 
             transparent: true, 
@@ -1936,7 +1805,6 @@ class SpaceNeedle {
             new Elevator(300, NEEDLE_PALETTE.ELEVATOR_RED, 4, this.group, audioGenerator)
         ];
 
-        // Restrict light distance to 40 so it doesn't bleed into the deck below
         this.blinkLight = new THREE.PointLight(0xff0000, 500, 40, 2);
         this.blinkLight.position.set(0, 545, 0);
         this.group.add(this.blinkLight);
@@ -1948,7 +1816,6 @@ class SpaceNeedle {
 
     update(delta) {
         this.time += delta;
-        // Slow rotation: The Loupe rotates 360 degrees in 45 minutes technically, but let's speed it up for visual effect
         this.rotatingGroup.rotation.y += delta * 0.05; 
         
         this.elevators.forEach(e => e.update(delta));
@@ -1969,59 +1836,39 @@ class SpaceNeedle {
 export function createEnvironment(scene, audioGenerator) {
   const env = new THREE.Group();
   
-  // 1. Base Layer (Bedrock/Bottom)
   createPlane(2000, 2000, '#556655', 0, -20, 0, -Math.PI/2, env);
 
-  // 2. Surface Planes (Y=-0.1) avoiding the 5th Ave strip (X: -10 to 30, Z: -230 to 80)
-  // West Plane
   createPlane(1000, 2000, '#556655', -510, -0.1, 0, -Math.PI/2, env); 
-  // East Plane
   createPlane(1000, 2000, '#556655', 530, -0.1, 0, -Math.PI/2, env);
-  // North Plane (Above Z=80, between X -10 and 30)
   createPlane(40, 1000, '#556655', 10, -0.1, 580, -Math.PI/2, env);
-  // South Plane (Below Z=-230, between X -10 and 30) -> This covers the tunnel
   createPlane(40, 1000, '#556655', 10, -0.1, -730, -Math.PI/2, env);
 
-  // 3. Detailed Voxel Road in the Gap
   createFifthAvePavement(env);
 
-  // Create Battery Street Tunnel (Underground)
   createTunnelGeometry(env);
 
-  // Westlake Center (Redesigned)
   const wl = new THREE.Group();
   wl.position.set(10, 0, 50);
 
   const beigeStone = '#D8C8B8';
   
-  // Left Tower (West)
   createBox(15, 60, 40, beigeStone, -22, 30, 20, wl);
   
-  // Right Tower (East)
   createBox(15, 60, 40, beigeStone, 22, 30, 20, wl);
   
-  // Overhead Bridge (The Mall levels) - Spanning across the gap
-  // Starts at Y=18 to clear monorail (height 12) + clearance
   createBox(30, 20, 40, beigeStone, 0, 50, 20, wl);
   
-  // Back Wall (Recessed) - To create the "Tunnel" look
-  // It starts further back (Z=20 relative to group center at 50, so Z=70 world)
   createBox(30, 60, 2, '#222', 0, 30, 38, wl);
 
-  // Station Platform Floor (Under tracks but above street)
-  // Tracks are at Y=12. Platform at Y=11.
-  createBox(10, 1, 40, COLORS.CONCRETE, -8, 11, 20, wl); // Left
-  createBox(10, 1, 40, COLORS.CONCRETE, 8, 11, 20, wl); // Right
+  createBox(10, 1, 40, COLORS.CONCRETE, -8, 11, 20, wl); 
+  createBox(10, 1, 40, COLORS.CONCRETE, 8, 11, 20, wl); 
   
-  // Columns holding up the overhead bridge
   createBox(2, 40, 2, beigeStone, -14, 20, 5, wl);
   createBox(2, 40, 2, beigeStone, 14, 20, 5, wl);
 
-  // Signage "WESTLAKE CENTER" - Simple blocks
-  createBox(28, 4, 1, '#004488', 0, 45, 1, wl); // Sign board
-  createBox(26, 0.5, 1.2, '#FFFFFF', 0, 45, 1, wl); // Text strip line
+  createBox(28, 4, 1, '#004488', 0, 45, 1, wl); 
+  createBox(26, 0.5, 1.2, '#FFFFFF', 0, 45, 1, wl); 
 
-  // Glass Windows on the towers
   const glassMat = new THREE.MeshStandardMaterial({ 
       color: '#88CCFF', transparent: true, opacity: 0.6, roughness: 0.1 
   });
@@ -2032,17 +1879,14 @@ export function createEnvironment(scene, audioGenerator) {
   gRight.position.set(22, 35, 0.5);
   wl.add(gRight);
 
-  // Details
   createTicketMachine(12, 11, 10, -Math.PI/2, wl);
   createTicketMachine(-12, 11, 10, Math.PI/2, wl);
   createBench(6, 11, 20, -Math.PI/2, wl);
   createBench(-6, 11, 20, Math.PI/2, wl);
 
   const bufferG = new THREE.Group();
-  // Z=30 relative to wl(50) = 80 Absolute. Matches new track end.
   bufferG.position.set(0, TRACK_HEIGHT, 30); 
   
-  // Red Bumpers (Relative X: -2.5 is Left Track, 2.5 is Right Track)
   const bMat = new THREE.MeshStandardMaterial({color: '#E31837', emissive: '#550000'});
   const bGeo = new THREE.BoxGeometry(1.5, 1, 1);
   const bufL = new THREE.Mesh(bGeo, bMat); bufL.position.set(-2.5, 0.5, 0); bufferG.add(bufL);
@@ -2062,7 +1906,6 @@ export function createEnvironment(scene, audioGenerator) {
   }
   env.add(wl);
 
-  // Seattle Center (End)
   const seattleCenter = new THREE.Group();
   seattleCenter.position.set(-155, 0, -280);
   createBox(50, 2, 16, '#EEEEEE', 0, TRACK_HEIGHT - 1, 0, seattleCenter); 
@@ -2116,13 +1959,11 @@ export function createEnvironment(scene, audioGenerator) {
   const needle = new SpaceNeedle(seattleCenter, -40, 0, 85, audioGenerator);
   animatedObjects.push(needle);
 
-  // MoPOP
   const mopop = new THREE.Group();
   mopop.position.set(-70, 0, -280);
   mopop.rotation.y = Math.PI / 4;
   mopop.updateMatrix(); 
 
-  // --- SPOTLIGHTS ---
   const spotCount = 8;
   const spotRadius = 50; 
   for (let i = 0; i < spotCount; i++) {
@@ -2144,7 +1985,6 @@ export function createEnvironment(scene, audioGenerator) {
       createPlane(0.4, 0.4, '#FFFFE0', x, 0.51, z, -Math.PI/2, mopop).material.emissive = new THREE.Color(0xFFFFFF);
   }
 
-  // --- TRACK EXCLUSION LOGIC ---
   const relevantTrackPoints = [];
   const mopopWorldPos = new THREE.Vector3(-70, 0, -280);
   [TRACK_LEFT, TRACK_RIGHT].forEach(track => {
@@ -2160,14 +2000,23 @@ export function createEnvironment(scene, audioGenerator) {
   });
 
   const checkExclusion = (localX, localY, localZ) => {
+      if (typeof localY !== 'number') return false; 
       if (localY < TRACK_HEIGHT - 2 || localY > TRACK_HEIGHT + 6) return false;
+      
       const v = new THREE.Vector3(localX, localY, localZ);
-      v.applyMatrix4(mopop.matrix);
+      if (mopop && mopop.matrix) {
+          v.applyMatrix4(mopop.matrix);
+      }
 
-      if (!relevantTrackPoints || relevantTrackPoints.length === 0) return false;
+      if (!relevantTrackPoints || !Array.isArray(relevantTrackPoints) || relevantTrackPoints.length === 0) return false;
 
-      for(let p of relevantTrackPoints) {
-          if (!p || !p.x) continue;
+      for(let i=0; i<relevantTrackPoints.length; i++) {
+          const p = relevantTrackPoints[i];
+          if (!p) continue;
+          
+          if (typeof p.x === 'undefined' || typeof p.z === 'undefined') continue;
+          if (typeof v.x === 'undefined' || typeof v.z === 'undefined') continue;
+
           const dx = p.x - v.x;
           const dz = p.z - v.z;
           if (dx*dx + dz*dz < 16) { 
@@ -2244,7 +2093,6 @@ export function createEnvironment(scene, audioGenerator) {
 
   env.add(mopop);
 
-  // City Background
   const city = new THREE.Group();
 
   const createVoxelTree = (x, z, p) => {
@@ -2263,14 +2111,13 @@ export function createEnvironment(scene, audioGenerator) {
       createBox(0.3, 8, 0.3, '#444', 0, 4, 0, g);
       createBox(2.5, 0.2, 0.3, '#444', 1, 7.5, 0, g);
       
-      // Glass casing for light
       const glass = createBox(0.9, 0.5, 0.9, '#FFFFE0', 2, 7.2, 0, g);
       glass.material.transparent = true;
       glass.material.opacity = 0.8;
       glass.material.emissive = new THREE.Color('#FFFFE0');
       glass.material.emissiveIntensity = 0.8;
 
-      const bulb = new THREE.PointLight(0xFFAA00, 10, 30); // Orange/Gold
+      const bulb = new THREE.PointLight(0xFFAA00, 10, 30); 
       bulb.position.set(2, 6.5, 0); 
       bulb.userData = { nightLight: true }; 
       g.add(bulb);
@@ -2305,23 +2152,19 @@ export function createEnvironment(scene, audioGenerator) {
   for(let i=-3; i<12; i++) {
       const z = 40 - (i*25);
       
-      // Calculate ground elevation at this Z to place lamps correctly
       let y = 0;
-      // North Ramp (Battery St) logic
       if (z < -140 && z > -230) {
-          const rampLen = -90; // -230 - (-140)
+          const rampLen = -90; 
           const dist = z - (-140);
           const t = dist / rampLen;
           y = -12 * t;
       } 
-      // South Ramp (Westlake) logic
       else if (z > 40 && z < 100) {
-          const rampLen = 40; // 80 - 40
+          const rampLen = 40; 
           const dist = z - 40;
           const t = Math.min(1, dist / rampLen);
           y = -12 * t;
       }
-      // Ensure we don't go lower than tunnel floor (approx -12)
       y = Math.max(-12, y);
 
       createLamp(-8, z, Math.PI/2, city, y);
