@@ -137,14 +137,16 @@ const createNewsTower = (scene) => {
         {x: w/2, z: d/2}, {x: -w/2, z: d/2}
     ];
     corners.forEach(c => {
-        createCylinder(0.3, 0.3, 1, 8, '#333', c.x, roofY+0.5, c.z, group);
-        const l = new THREE.PointLight(0xFF0000, 1, 10);
-        l.position.set(c.x, roofY+1.5, c.z);
-        group.add(l);
-        // Emissive bulb
-        const bulb = createBox(0.4, 0.4, 0.4, '#FF0000', c.x, roofY+1.2, c.z, group);
-        bulb.material.emissive = new THREE.Color('#FF0000');
-        bulb.material.emissiveIntensity = 2;
+        if (c && typeof c.x === 'number') {
+            createCylinder(0.3, 0.3, 1, 8, '#333', c.x, roofY+0.5, c.z, group);
+            const l = new THREE.PointLight(0xFF0000, 1, 10);
+            l.position.set(c.x, roofY+1.5, c.z);
+            group.add(l);
+            // Emissive bulb
+            const bulb = createBox(0.4, 0.4, 0.4, '#FF0000', c.x, roofY+1.2, c.z, group);
+            bulb.material.emissive = new THREE.Color('#FF0000');
+            bulb.material.emissiveIntensity = 2;
+        }
     });
 
     scene.add(group);
@@ -1338,9 +1340,11 @@ const createPacificScienceCenter = (x, z, parent) => {
     for (let i = 0; i < 5; i++) {
         const zPos = (i - 2) * 30; // Spacing: -60, -30, 0, 30, 60
         towerVoxels.forEach(v => {
-            dummy.position.set(v.x, v.y + 0.5, v.z + zPos); // +0.5 to sit on water
-            dummy.updateMatrix();
-            towerMesh.setMatrixAt(idx++, dummy.matrix);
+            if (v && typeof v.x === 'number') {
+                dummy.position.set(v.x, v.y + 0.5, v.z + zPos); // +0.5 to sit on water
+                dummy.updateMatrix();
+                towerMesh.setMatrixAt(idx++, dummy.matrix);
+            }
         });
     }
     towerMesh.castShadow = true;
@@ -1378,9 +1382,11 @@ const createPacificScienceCenter = (x, z, parent) => {
     for(let i=0; i<4; i++) {
         const zPos = (i - 1.5) * 30; // Centered in the gaps
         fountainVoxels.forEach(v => {
-            dummy.position.set(v.x, v.y + 0.5, v.z + zPos);
-            dummy.updateMatrix();
-            fMesh.setMatrixAt(idx++, dummy.matrix);
+            if (v && typeof v.x === 'number') {
+                dummy.position.set(v.x, v.y + 0.5, v.z + zPos);
+                dummy.updateMatrix();
+                fMesh.setMatrixAt(idx++, dummy.matrix);
+            }
         });
     }
     group.add(fMesh);
@@ -1414,19 +1420,23 @@ const createPacificScienceCenter = (x, z, parent) => {
     idx = 0;
     // East Wall
     wVoxels.forEach(v => {
-        dummy.position.set(v.x + (poolW/2 + 2), v.y + 0.5, v.z);
-        dummy.rotation.set(0,0,0);
-        dummy.updateMatrix();
-        wMesh.setMatrixAt(idx++, dummy.matrix);
+        if (v && typeof v.x === 'number') {
+            dummy.position.set(v.x + (poolW/2 + 2), v.y + 0.5, v.z);
+            dummy.rotation.set(0,0,0);
+            dummy.updateMatrix();
+            wMesh.setMatrixAt(idx++, dummy.matrix);
+        }
     });
     // West Wall (Mirrored position)
     wVoxels.forEach(v => {
-        // Flip X for the voxel coord to mirror texture pattern direction if desired, 
-        // or just move position.
-        dummy.position.set(-(v.x + (poolW/2 + 2)), v.y + 0.5, v.z);
-        dummy.rotation.set(0, Math.PI, 0); // Face inward
-        dummy.updateMatrix();
-        wMesh.setMatrixAt(idx++, dummy.matrix);
+        if (v && typeof v.x === 'number') {
+            // Flip X for the voxel coord to mirror texture pattern direction if desired, 
+            // or just move position.
+            dummy.position.set(-(v.x + (poolW/2 + 2)), v.y + 0.5, v.z);
+            dummy.rotation.set(0, Math.PI, 0); // Face inward
+            dummy.updateMatrix();
+            wMesh.setMatrixAt(idx++, dummy.matrix);
+        }
     });
     wMesh.castShadow = true;
     wMesh.receiveShadow = true;
@@ -1617,10 +1627,12 @@ export const createFifthAvePavement = (scene) => {
     const dummy = new THREE.Object3D();
     
     voxels.forEach((v, i) => {
-        dummy.position.set(v.x, v.y, v.z);
-        dummy.updateMatrix();
-        mesh.setMatrixAt(i, dummy.matrix);
-        mesh.setColorAt(i, v.color);
+        if (v && typeof v.x === 'number') {
+            dummy.position.set(v.x, v.y, v.z);
+            dummy.updateMatrix();
+            mesh.setMatrixAt(i, dummy.matrix);
+            mesh.setColorAt(i, v.color);
+        }
     });
     
     mesh.instanceMatrix.needsUpdate = true;
@@ -1690,9 +1702,11 @@ function createSteppedLobe(scene, center, dimensions, colorHex, matParams, shape
     const dummy = new THREE.Object3D();
     
     voxels.forEach((v, i) => {
-        dummy.position.set(v.x, v.y, v.z);
-        dummy.updateMatrix();
-        mesh.setMatrixAt(i, dummy.matrix);
+        if (v && typeof v.x === 'number') {
+            dummy.position.set(v.x, v.y, v.z);
+            dummy.updateMatrix();
+            mesh.setMatrixAt(i, dummy.matrix);
+        }
     });
     
     mesh.castShadow = true;
@@ -2182,10 +2196,12 @@ class Elevator {
       
       const dummy = new THREE.Object3D();
       this.solidVoxels.forEach((v, i) => {
-          dummy.position.set(v.x, v.y, v.z);
-          dummy.updateMatrix();
-          this.mesh.setMatrixAt(i, dummy.matrix);
-          this.mesh.setColorAt(i, v.color);
+          if (v && typeof v.x === 'number') {
+              dummy.position.set(v.x, v.y, v.z);
+              dummy.updateMatrix();
+              this.mesh.setMatrixAt(i, dummy.matrix);
+              this.mesh.setColorAt(i, v.color);
+          }
       });
       this.mesh.instanceMatrix.needsUpdate = true;
       if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
@@ -2197,9 +2213,11 @@ class Elevator {
       this.glassMesh = new THREE.InstancedMesh(geo, glassMat, this.glassVoxels.length);
       
       this.glassVoxels.forEach((v, i) => {
-          dummy.position.set(v.x, v.y, v.z);
-          dummy.updateMatrix();
-          this.glassMesh.setMatrixAt(i, dummy.matrix);
+          if (v && typeof v.x === 'number') {
+              dummy.position.set(v.x, v.y, v.z);
+              dummy.updateMatrix();
+              this.glassMesh.setMatrixAt(i, dummy.matrix);
+          }
       });
       this.glassMesh.instanceMatrix.needsUpdate = true;
       this.carGroup.add(this.glassMesh);
@@ -2266,12 +2284,14 @@ class SpaceNeedle {
             const dummy = new THREE.Object3D();
             const color = new THREE.Color();
             voxels.forEach((v, i) => {
-                dummy.position.set(v.x, v.y, v.z);
-                dummy.updateMatrix();
-                mesh.setMatrixAt(i, dummy.matrix);
-                if (v.color) {
-                    color.set(v.color);
-                    mesh.setColorAt(i, color);
+                if (v && typeof v.x === 'number') {
+                    dummy.position.set(v.x, v.y, v.z);
+                    dummy.updateMatrix();
+                    mesh.setMatrixAt(i, dummy.matrix);
+                    if (v.color) {
+                        color.set(v.color);
+                        mesh.setColorAt(i, color);
+                    }
                 }
             });
             mesh.instanceMatrix.needsUpdate = true;
