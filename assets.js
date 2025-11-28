@@ -8,6 +8,8 @@ export const animatedObjects = [];
 
 // --- TRACK ---
 export function createTrack(curve, scene) {
+  if (!curve || !curve.getLength) return;
+
   const group = new THREE.Group();
 
   const shape = new THREE.Shape();
