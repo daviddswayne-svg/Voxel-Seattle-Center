@@ -1,0 +1,2373 @@
+
+import * as THREE from 'three';
+import { COLORS, TRACK_HEIGHT, PIER_SPACING, CarType, TRACK_LEFT, TRACK_RIGHT, TAXI_PATH } from './constants.js';
+import { createBox, createCylinder, createPlane } from './utils.js';
+
+// Global list of objects requiring animation updates
+export const animatedObjects = [];
+
+// --- TRACK ---
+export function createTrack(curve, scene) {
+  const group = new THREE.Group();
+
+  const shape = new THREE.Shape();
+  const w = 1.2, h = 2.0;
+  shape.moveTo(-w/2, -h/2);
+  shape.lineTo(w/2, -h/2);
+  shape.lineTo(w/2, h/2);
+  shape.lineTo(-w/2, h/2);
+  shape.lineTo(-w/2, -h/2);
+
+  const extrudeSettings = { steps: 200, bevelEnabled: false, extrudePath: curve };
+  const beamGeo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+  const beamMat = new THREE.MeshStandardMaterial({ color: COLORS.CONCRETE, roughness: 0.8 });
+  const beam = new THREE.Mesh(beamGeo, beamMat);
+  beam.castShadow = true;
+  beam.receiveShadow = true;
+  group.add(beam);
+
+  const length = curve.getLength();
+  const count = Math.floor(length / PIER_SPACING);
+  
+  for (let i = 0; i <= count; i++) {
+      const t = i / count;
+      const position = curve.getPointAt(t);
+      const tangent = curve.getTangentAt(t);
+      
+      if (!position) continue; // Safety check
+
+      const dummy = new THREE.Object3D();
+      dummy.position.copy(position);
+      if (tangent) {
+          dummy.lookAt(position.clone().add(tangent));
+      }
+      
+      const pierGroup = new THREE.Group();
+      pierGroup.position.copy(position);
+      pierGroup.rotation.y = dummy.rotation.y;
+
+      // Calculate Ground Height (Ramp Logic) to ensure pillars touch ground
+      let groundY = 0;
+      const z = position.z;
+      const x = position.x;
+      
+      // Only apply ramp depth if within the 5th Ave cut bounds
+      if (x > -10 && x < 30) {
+          if (z < -140 && z > -230) {
+              // North Ramp (Battery St)
+              const rampLen = -90; // -230 - (-140)
+              const dist = z - (-140);
+              const tRamp = Math.max(0, Math.min(1, dist / rampLen));
+              groundY = -12 * tRamp;
+          } else if (z > 40 && z < 100) {
+              // South Ramp (Westlake)
+              const rampLen = 40; // 80 - 40 (approx end of ramp)
+              const dist = z - 40;
+              const tRamp = Math.max(0, Math.min(1, dist / rampLen));
+              groundY = -12 * tRamp;
+          }
+      }
+
+      const beamHalfHeight = 1.0;
+      const capHeight = 1.5;
+      const capTopY = -beamHalfHeight;
+      const capCy = capTopY - capHeight / 2;
+      const capBottomY = capTopY - capHeight;
+      
+      // Calculate pillar height: Top is at (TRACK_HEIGHT + capBottomY), Bottom is at groundY
+      // Local Y of track is 0 inside pierGroup (which is at world Y=12)
+      // Top relative to pierGroup is capBottomY (-2.5)
+      // Bottom relative to pierGroup is groundY - 12
+      
+      const topRel = capBottomY;
+      const botRel = groundY - position.y; 
+      const columnHeight = topRel - botRel;
+      
+      const columnCy = topRel - columnHeight / 2;
+
+      // Only build piers if they are valid
+      if (columnHeight > 0.5) {
+          createBox(1.5, columnHeight, 1.5, COLORS.CONCRETE_DARK, 0, columnCy, 0, pierGroup);
+          createBox(3.0, capHeight, 2.0, COLORS.CONCRETE, 0, capCy, 0, pierGroup);
+          group.add(pierGroup);
+      }
+  }
+
+  scene.add(group);
+}
+
+// --- CAR (Alweg Style - Mid Century Modern) ---
+export function createCarMesh(type, color) {
+  const group = new THREE.Group();
+  const isHead = type === CarType.HEAD;
+  const isTail = type === CarType.TAIL;
+  
+  // Dimensions for Alweg Style
+  const carWidth = 2.4; 
+  const carHeight = 2.4;
+  const carLength = 4.5;
+  
+  // Materials
+  const paintMat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.3, metalness: 0.1 });
+  const skirtMat = new THREE.MeshStandardMaterial({ color: '#444444', roughness: 0.8 }); // Dark grey undercarriage
+  const chromeMat = new THREE.MeshStandardMaterial({ color: '#EEEEEE', roughness: 0.1, metalness: 0.9 });
+  const glassMat = new THREE.MeshStandardMaterial({ 
+      color: COLORS.GLASS, transparent: true, opacity: 0.4, roughness: 0.0, metalness: 0.9 
+  });
+  const roofMat = new THREE.MeshStandardMaterial({ color: COLORS.ROOF, roughness: 0.5 });
+
+  // --- 1. SKIRT (Undercarriage) ---
+  // Hides the wheels and hugs the beam
+  const skirtGeo = new THREE.BoxGeometry(carWidth, 1.2, carLength);
+  const skirt = new THREE.Mesh(skirtGeo, skirtMat);
+  skirt.position.set(0, 0.4, 0); 
+  group.add(skirt);
+  
+  // --- 2. MAIN HULL ---
+  // Sits above skirt
+  const hullGeo = new THREE.BoxGeometry(carWidth, 1.0, carLength);
+  const hull = new THREE.Mesh(hullGeo, paintMat);
+  hull.position.set(0, 1.5, 0); 
+  group.add(hull);
+
+  // Chrome beltline strip
+  const beltGeo = new THREE.BoxGeometry(carWidth + 0.05, 0.15, carLength);
+  const belt = new THREE.Mesh(beltGeo, chromeMat);
+  belt.position.set(0, 1.1, 0);
+  group.add(belt);
+
+  // --- 3. WINDOWS ---
+  // Continuous panoramic glass strip
+  const glassStripGeo = new THREE.BoxGeometry(carWidth - 0.1, 0.8, carLength - 0.2);
+  const glassStrip = new THREE.Mesh(glassStripGeo, glassMat);
+  glassStrip.position.set(0, 1.8, 0);
+  group.add(glassStrip);
+  
+  // Window Pillars (Body color)
+  for(let z = -1.5; z <= 1.5; z+=1.5) {
+     const pil = createBox(carWidth, 0.8, 0.3, color, 0, 1.8, z, group);
+  }
+
+  // --- 4. ROOF ---
+  const roofGeo = new THREE.BoxGeometry(carWidth, 0.4, carLength);
+  const roof = new THREE.Mesh(roofGeo, roofMat);
+  roof.position.set(0, 2.4, 0);
+  group.add(roof);
+
+  // Top vents
+  createBox(1.2, 0.2, 3.0, COLORS.VENT, 0, 2.6, 0, group);
+
+  // --- 5. NOSE / TAIL SECTIONS ---
+  if (isHead || isTail) {
+      const noseGroup = new THREE.Group();
+      // Position at end of car
+      const zOffset = isHead ? 2.25 : -2.25; 
+      noseGroup.position.set(0, 0, zOffset);
+      
+      if (isTail) noseGroup.rotation.y = Math.PI; // Face outwards
+      
+      // A. Lower Jaw / Bumper Section
+      // Extends the skirt
+      createBox(carWidth, 1.2, 1.2, '#444', 0, 0.4, 0.6, noseGroup);
+      
+      // Chrome Bumper - Heavy retro styling
+      const bumper = new THREE.Mesh(new THREE.BoxGeometry(carWidth + 0.2, 0.5, 0.4), chromeMat);
+      bumper.position.set(0, 0.4, 1.2);
+      noseGroup.add(bumper);
+
+      // B. Mid Nose (Painted) - Tapering step
+      createBox(carWidth, 0.8, 1.0, color, 0, 1.4, 0.5, noseGroup);
+      
+      // Chrome V-Shape or Logo on nose
+      createBox(0.2, 0.6, 0.1, '#EEE', 0, 1.4, 1.01, noseGroup);
+
+      // C. Cockpit / Windshield (Sloped)
+      // We simulate the slope by rotating a glass block
+      const windshield = new THREE.Mesh(new THREE.BoxGeometry(carWidth - 0.2, 1.1, 1.0), glassMat);
+      windshield.position.set(0, 2.0, 0.4); 
+      windshield.rotation.x = -0.25; // 60s aerodynamic slope
+      noseGroup.add(windshield);
+      
+      // D. Roof Cap (Overhang peak)
+      const cap = createBox(carWidth, 0.3, 1.2, COLORS.ROOF, 0, 2.55, 0.1, noseGroup);
+      // Slight tilt to match window
+      cap.rotation.x = -0.05;
+
+      // E. Lights
+      const lightColor = isHead ? 0xFFFFEE : 0xFF0000;
+      const lightEmissive = isHead ? 0xFFFFEE : 0xAA0000;
+      const lightMat = new THREE.MeshStandardMaterial({
+          color: lightColor, 
+          emissive: lightEmissive, 
+          emissiveIntensity: 3.0 
+      });
+      
+      // Dual round lights embedded in the nose
+      const l1 = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.2, 16), lightMat);
+      l1.rotation.x = Math.PI/2;
+      l1.position.set(-0.8, 1.0, 1.0); // Embedded
+      noseGroup.add(l1);
+
+      const l2 = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.2, 16), lightMat);
+      l2.rotation.x = Math.PI/2;
+      l2.position.set(0.8, 1.0, 1.0); // Embedded
+      noseGroup.add(l2);
+
+      // F. Functional Light Source (Spotlight)
+      if (isHead) {
+           const spot = new THREE.SpotLight(0xFFFFFF, 10, 80, Math.PI/6, 0.3);
+           spot.position.set(0, 2.0, 0.0);
+           spot.target.position.set(0, 0, 20);
+           spot.userData = { nightLight: true };
+           spot.visible = false; // Initially hidden, toggled by index.js
+           noseGroup.add(spot);
+           noseGroup.add(spot.target);
+      } else {
+           const point = new THREE.PointLight(0xFF0000, 3, 10);
+           point.position.set(0, 1.0, 1.5);
+           point.userData = { nightLight: true };
+           point.visible = false;
+           noseGroup.add(point);
+      }
+
+      group.add(noseGroup);
+  } else {
+      // Accordion Connector for middle cars (Between body segments)
+      // Dark rubber look
+      const accordion = createBox(1.8, 2.0, 0.4, '#222', 0, 1.5, -2.45, group);
+      // Detail ribs
+      createBox(2.0, 2.1, 0.1, '#111', 0, 1.5, -2.3, group);
+      createBox(2.0, 2.1, 0.1, '#111', 0, 1.5, -2.6, group);
+  }
+  
+  return group;
+}
+
+const createTicketMachine = (x, y, z, rotY=0, parent) => {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    g.rotation.y = rotY;
+    createBox(0.8, 2, 0.6, '#004488', 0, 1, 0, g);
+    const screen = createPlane(0.5, 0.4, '#AADDFF', 0, 1.5, 0.31, 0, g);
+    screen.material.emissive = new THREE.Color('#AADDFF');
+    screen.material.emissiveIntensity = 0.6;
+    createPlane(0.4, 0.1, '#111', 0, 1.1, 0.31, 0, g);
+    createBox(0.8, 0.2, 0.6, '#C0C0C0', 0, 2.1, 0, g);
+    if(parent) parent.add(g);
+    return g;
+};
+
+const createBench = (x, y, z, rotY=0, parent) => {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    g.rotation.y = rotY;
+    createBox(3, 0.1, 1, '#8B4513', 0, 0.5, 0, g);
+    createBox(0.2, 0.5, 0.8, '#333', -1.2, 0.25, 0, g);
+    createBox(0.2, 0.5, 0.8, '#333', 1.2, 0.25, 0, g);
+    createBox(3, 0.5, 0.1, '#8B4513', 0, 0.8, -0.4, g);
+    if(parent) parent.add(g);
+    return g;
+};
+
+const createCoffeeKiosk = (x, y, z, parent) => {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    createCylinder(2, 2, 2, 6, '#6F4E37', 0, 1, 0, g);
+    createCylinder(2.2, 2.2, 0.1, 6, '#FFF', 0, 2.05, 0, g);
+    createCylinder(0.2, 0.2, 2, 8, '#333', 0, 3, 0, g);
+    createCylinder(0, 2.5, 1.5, 6, '#228B22', 0, 4, 0, g);
+    createBox(0.6, 1, 0.6, '#FFF', 0, 2.5, 0, g);
+    createBox(0.4, 0.4, 0.4, '#FFCCAA', 0, 3.2, 0, g);
+    if(parent) parent.add(g);
+};
+
+const createTurnstile = (x, y, z, parent) => {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    createBox(0.2, 1, 1, '#C0C0C0', 0, 0.5, 0, g);
+    createBox(1, 0.1, 0.1, 'red', 0.5, 0.8, 0, g);
+    if(parent) parent.add(g);
+}
+
+// --- TRAFFIC SYSTEM ---
+
+class TrafficCar {
+  constructor(x, z, speed, direction, color, zLimit, audioGenerator) {
+    this.group = new THREE.Group();
+    this.group.position.set(x, 0, z);
+    this.speed = speed;
+    this.direction = direction;
+    this.zLimit = zLimit; 
+    // South end extended to 85 (tunnel), North end stays -250
+    this.startZ = direction === -1 ? 85 : -250;
+    
+    // Audio
+    if (audioGenerator) {
+        // refDistance 40 -> Louder from orbit
+        const sound = audioGenerator.createPositionalAudio('TRAFFIC', 40, 400, 0.4);
+        if (sound) this.group.add(sound);
+    }
+
+    const body = createBox(2.2, 1.0, 4.5, color, 0, 1.0, 0, this.group);
+    createBox(2.0, 0.8, 2.5, '#333', 0, 1.9, -0.2, this.group); 
+    createBox(2.1, 0.15, 2.6, color, 0, 2.3, -0.2, this.group); 
+    
+    const wCol = '#222';
+    const wY = 0.4;
+    const wOffX = 1.1;
+    const wOffZ = 1.2;
+    const wheelGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.4, 16);
+    const wheelMat = new THREE.MeshStandardMaterial({ color: wCol });
+    
+    const w1 = new THREE.Mesh(wheelGeo, wheelMat); w1.position.set(wOffX, wY, wOffZ); w1.rotation.z = Math.PI/2; this.group.add(w1);
+    const w2 = new THREE.Mesh(wheelGeo, wheelMat); w2.position.set(-wOffX, wY, wOffZ); w2.rotation.z = Math.PI/2; this.group.add(w2);
+    const w3 = new THREE.Mesh(wheelGeo, wheelMat); w3.position.set(wOffX, wY, -1.5); w3.rotation.z = Math.PI/2; this.group.add(w3);
+    const w4 = new THREE.Mesh(wheelGeo, wheelMat); w4.position.set(-wOffX, wY, -1.5); w4.rotation.z = Math.PI/2; this.group.add(w4);
+
+    // Night Mode: Headlights & Taillights
+    const hlIntensity = 8;
+    const hlDist = 40;
+    const hlAngle = Math.PI / 5;
+    const hlPenumbra = 0.5;
+
+    if (direction === -1) {
+       const head = createBox(1.8, 0.2, 0.1, '#FFF', 0, 1.0, -2.26, this.group);
+       head.material.emissive = new THREE.Color('#FFFFE0');
+       
+       const hl = new THREE.SpotLight(0xFFFFEE, hlIntensity, hlDist, hlAngle, hlPenumbra);
+       hl.position.set(0, 1.0, -2.3);
+       hl.target.position.set(0, 0.0, -15);
+       hl.userData = { nightLight: true };
+       hl.castShadow = false;
+       this.group.add(hl);
+       this.group.add(hl.target);
+
+       const tail = createBox(1.8, 0.2, 0.1, '#F00', 0, 1.0, 2.26, this.group);
+       tail.material.emissive = new THREE.Color('#AA0000');
+       
+       const tl = new THREE.PointLight(0xFF0000, 2, 5);
+       tl.position.set(0, 1.0, 2.4);
+       tl.userData = { nightLight: true };
+       this.group.add(tl);
+
+    } else {
+       const head = createBox(1.8, 0.2, 0.1, '#FFF', 0, 1.0, 2.26, this.group);
+       head.material.emissive = new THREE.Color('#FFFFE0');
+
+       const hl = new THREE.SpotLight(0xFFFFEE, hlIntensity, hlDist, hlAngle, hlPenumbra);
+       hl.position.set(0, 1.0, 2.3);
+       hl.target.position.set(0, 0.0, 15);
+       hl.userData = { nightLight: true };
+       hl.castShadow = false;
+       this.group.add(hl);
+       this.group.add(hl.target);
+
+       const tail = createBox(1.8, 0.2, 0.1, '#F00', 0, 1.0, -2.26, this.group);
+       tail.material.emissive = new THREE.Color('#AA0000');
+
+       const tl = new THREE.PointLight(0xFF0000, 2, 5);
+       tl.position.set(0, 1.0, -2.4);
+       tl.userData = { nightLight: true };
+       this.group.add(tl);
+    }
+  }
+
+  update(delta) {
+    this.group.position.z += this.speed * this.direction * delta;
+    if (this.direction === -1 && this.group.position.z < this.zLimit) {
+        this.group.position.z = this.startZ;
+    } else if (this.direction === 1 && this.group.position.z > this.zLimit) {
+        this.group.position.z = this.startZ;
+    }
+
+    const z = this.group.position.z;
+    const depth = -12;
+    
+    // Ramp 1: North (Battery St) Z < -140
+    const rampStartN = -140;
+    const rampEndN = -230;
+
+    // Ramp 2: South (Westlake) Z > 40
+    const rampStartS = 40;
+    const rampEndS = 80;
+
+    if (z < rampStartN && z > rampEndN) {
+        const t = (z - rampStartN) / (rampEndN - rampStartN);
+        this.group.position.y = depth * t;
+        // North Ramp Pitch
+        this.group.rotation.x = this.direction * 0.133;
+    } else if (z > rampStartS && z < rampEndS) {
+        const t = (z - rampStartS) / (rampEndS - rampStartS);
+        this.group.position.y = depth * t;
+        // South Ramp Pitch (Opposite slope direction requires inverted pitch relative to car direction)
+        this.group.rotation.x = -this.direction * 0.133;
+    } else if (z <= rampEndN || z >= rampEndS) {
+        // Underground
+        this.group.position.y = depth;
+        this.group.rotation.x = 0;
+    } else {
+        // Surface
+        this.group.position.y = 0;
+        this.group.rotation.x = 0;
+    }
+  }
+}
+
+class TrafficSystem {
+    constructor(scene, audioGenerator) {
+        this.cars = [];
+        const colors = ['#A93226', '#1F618D', '#117A65', '#D68910', '#D35400', '#7F8C8D', '#2E4053', '#F1C40F', '#E74C3C'];
+        const SPEED = 20; 
+        const NUM_CARS = 10;
+        const SPACING = 25; 
+
+        // Northbound (dir -1): Start at Z=85 (underground Westlake), go to -250 (underground Battery)
+        for(let i=0; i<NUM_CARS; i++) {
+             const z = 85 - (i * SPACING); // Start deeper
+             const color = colors[Math.floor(Math.random() * colors.length)];
+             const car = new TrafficCar(17.5, z, SPEED, -1, color, -250, audioGenerator);
+             scene.add(car.group);
+             this.cars.push(car);
+        }
+        // Southbound (dir 1): Start at Z=-250, go to 85
+        for(let i=0; i<NUM_CARS; i++) {
+             const z = -250 + (i * SPACING);
+             const color = colors[Math.floor(Math.random() * colors.length)];
+             const car = new TrafficCar(2.5, z, SPEED, 1, color, 85, audioGenerator);
+             scene.add(car.group);
+             this.cars.push(car);
+        }
+    }
+
+    update(delta) {
+        this.cars.forEach(car => car.update(delta));
+    }
+}
+
+export class HeroTaxi {
+    constructor(scene, audioGenerator) {
+        this.group = new THREE.Group();
+        this.speed = 35; 
+        this.progress = 0;
+        this.isHeroTaxi = true; 
+        
+        const taxiColor = '#FFD700'; 
+        
+        createBox(2.2, 1.0, 4.5, taxiColor, 0, 1.0, 0, this.group);
+        createBox(2.0, 0.8, 2.5, '#333', 0, 1.9, -0.2, this.group); 
+        createBox(2.1, 0.15, 2.6, taxiColor, 0, 2.3, -0.2, this.group); 
+
+        for(let i=0; i<8; i++) {
+            const z = -2 + (i*0.5);
+            const col = i % 2 === 0 ? '#000' : '#FFF';
+            createBox(0.1, 0.2, 0.4, col, 1.11, 1.0, z, this.group);
+            createBox(0.1, 0.2, 0.4, col, -1.11, 1.0, z, this.group);
+        }
+
+        const sign = createBox(0.8, 0.3, 0.4, '#FFFFE0', 0, 2.5, 0.5, this.group);
+        sign.material.emissive = new THREE.Color('#FFFFE0');
+        sign.material.emissiveIntensity = 0.5;
+        
+        const wCol = '#222';
+        const wY = 0.4;
+        const wOffX = 1.1;
+        const wOffZ = 1.2;
+        const wheelGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.4, 16);
+        const wheelMat = new THREE.MeshStandardMaterial({ color: wCol });
+        const w1 = new THREE.Mesh(wheelGeo, wheelMat); w1.position.set(wOffX, wY, wOffZ); w1.rotation.z = Math.PI/2; this.group.add(w1);
+        const w2 = new THREE.Mesh(wheelGeo, wheelMat); w2.position.set(-wOffX, wY, wOffZ); w2.rotation.z = Math.PI/2; this.group.add(w2);
+        const w3 = new THREE.Mesh(wheelGeo, wheelMat); w3.position.set(wOffX, wY, -1.5); w3.rotation.z = Math.PI/2; this.group.add(w3);
+        const w4 = new THREE.Mesh(wheelGeo, wheelMat); w4.position.set(-wOffX, wY, -1.5); w4.rotation.z = Math.PI/2; this.group.add(w4);
+
+        const head = createBox(1.8, 0.2, 0.1, '#FFF', 0, 1.0, -2.26, this.group);
+        head.material.emissive = new THREE.Color('#FFFFE0');
+        const tail = createBox(1.8, 0.2, 0.1, '#F00', 0, 1.0, 2.26, this.group);
+        tail.material.emissive = new THREE.Color('#AA0000');
+
+        // --- NIGHT LIGHTS ---
+        const hlIntensity = 20;
+        const hlDist = 60;
+        const hlAngle = Math.PI / 6;
+        const hlPenumbra = 0.5;
+
+        const leftHL = new THREE.SpotLight(0xFFFFEE, hlIntensity, hlDist, hlAngle, hlPenumbra);
+        leftHL.position.set(0.6, 1.0, -2.3);
+        leftHL.target.position.set(0.6, 0.0, -10);
+        leftHL.userData = { nightLight: true };
+        this.group.add(leftHL);
+        this.group.add(leftHL.target);
+
+        const rightHL = new THREE.SpotLight(0xFFFFEE, hlIntensity, hlDist, hlAngle, hlPenumbra);
+        rightHL.position.set(-0.6, 1.0, -2.3);
+        rightHL.target.position.set(-0.6, 0.0, -10);
+        rightHL.userData = { nightLight: true };
+        this.group.add(rightHL);
+        this.group.add(rightHL.target);
+
+        // --- CAMERA RIG ---
+        this.cameraRig = new THREE.Object3D();
+        this.cameraRig.position.set(0, 3.0, 0.5);
+        this.group.add(this.cameraRig);
+
+        this.viewTarget = new THREE.Object3D();
+        this.viewTarget.position.set(0, 1.8, -50); 
+        this.group.add(this.viewTarget);
+
+        if (audioGenerator) {
+            const sound = audioGenerator.createPositionalAudio('TRAFFIC', 30, 300, 0.8);
+            if (sound) this.group.add(sound);
+        }
+
+        scene.add(this.group);
+    }
+
+    update(delta) {
+        const length = TAXI_PATH.getLength();
+        const step = (this.speed * delta) / length;
+        this.progress += step;
+        if (this.progress > 1) this.progress -= 1;
+
+        const pos = TAXI_PATH.getPointAt(this.progress);
+        const tangent = TAXI_PATH.getTangentAt(this.progress);
+
+        if (pos) {
+            this.group.position.copy(pos);
+            if (tangent) {
+                this.group.lookAt(pos.clone().add(tangent));
+            }
+            this.group.rotateY(Math.PI);
+        }
+    }
+
+    getCameraTarget() {
+        const eyePos = new THREE.Vector3();
+        const lookPos = new THREE.Vector3();
+        this.cameraRig.getWorldPosition(eyePos);
+        this.viewTarget.getWorldPosition(lookPos);
+        return { position: eyePos, lookAt: lookPos };
+    }
+}
+
+const createTunnelGeometry = (scene) => {
+    // Generate tunnel shell around the curve where Y < -3.0
+    // We start deeper (-3.0) to align with the tunnel entrance sign at Z = -225
+    const points = TAXI_PATH.getSpacedPoints(400);
+    const tunnelShape = new THREE.Shape();
+    // Inverted U shape
+    const w = 6;
+    const h = 5;
+    tunnelShape.moveTo(-w, -2);
+    tunnelShape.lineTo(w, -2);
+    tunnelShape.lineTo(w, h);
+    tunnelShape.lineTo(-w, h);
+    tunnelShape.lineTo(-w, -2);
+
+    const undergroundPoints = points.filter(p => p.y < -3.0);
+    
+    if (undergroundPoints.length < 2) return;
+
+    // Create a new curve for just the underground section to extrude
+    const undergroundCurve = new THREE.CatmullRomCurve3(undergroundPoints);
+    
+    const extrudeSettings = { steps: 100, bevelEnabled: false, extrudePath: undergroundCurve };
+    const geo = new THREE.ExtrudeGeometry(tunnelShape, extrudeSettings);
+    
+    const mat = new THREE.MeshStandardMaterial({ 
+        color: '#444444', 
+        side: THREE.BackSide, // Important to see from inside
+        roughness: 0.9 
+    });
+    const tunnel = new THREE.Mesh(geo, mat);
+    scene.add(tunnel);
+
+    // Ceiling Lights (Orange Sodium)
+    const lightGeo = new THREE.BoxGeometry(2, 0.2, 4);
+    const lightMat = new THREE.MeshStandardMaterial({ color: '#FF9900', emissive: '#FF9900', emissiveIntensity: 2.0 });
+    
+    // Add lights every 40 units along the underground curve
+    const lightCurve = undergroundCurve;
+    const len = lightCurve.getLength();
+    const count = Math.floor(len / 40);
+    for(let i=0; i<count; i++) {
+        const t = i/count;
+        const p = lightCurve.getPointAt(t);
+        const tan = lightCurve.getTangentAt(t);
+        if (p && tan) {
+            const light = new THREE.Mesh(lightGeo, lightMat);
+            light.position.set(p.x, p.y + 4.5, p.z);
+            light.lookAt(p.clone().add(tan));
+            scene.add(light);
+
+            const pl = new THREE.PointLight('#FF9900', 100, 30);
+            pl.position.set(p.x, p.y + 4, p.z);
+            scene.add(pl);
+        }
+    }
+}
+
+
+// --- BUILDING GENERATORS ---
+
+const createDetailedBrickBuilding = (x, z, floors, width, depth, color, scene) => {
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+
+    const floorHeight = 4;
+    createBox(width, 5, depth, '#2F2F2F', 0, 2.5, 0, group);
+    createBox(width - 2, 3.5, depth + 0.1, '#FFAA55', 0, 2.5, 0, group).material.emissive = new THREE.Color('#553311');
+    createBox(width - 1.5, 0.5, depth + 0.2, '#111', 0, 4.5, 0, group); 
+
+    const winsX = Math.floor(width / 4);
+    const numWindows = (floors - 1) * winsX; 
+
+    if (numWindows > 0) {
+        const frameGeo = new THREE.BoxGeometry(2.2, 2.2, depth + 0.2);
+        const frameMat = new THREE.MeshStandardMaterial({ color: '#333' });
+        
+        // Split windows into Dark and Lit
+        const glassGeo = new THREE.BoxGeometry(1.8, 1.8, depth + 0.3);
+        const glassMat = new THREE.MeshStandardMaterial({ color: '#112233', roughness: 0.2 });
+        const litGlassMat = new THREE.MeshStandardMaterial({ color: '#FFFFEE', emissive: '#FFFFEE', emissiveIntensity: 0.0 });
+        
+        const sillGeo = new THREE.BoxGeometry(2.4, 0.4, depth + 0.4);
+        const sillMat = new THREE.MeshStandardMaterial({ color: '#222' });
+        const lintelGeo = new THREE.BoxGeometry(2.4, 0.6, depth + 0.4);
+        const lintelMat = new THREE.MeshStandardMaterial({ color: color });
+        lintelMat.lightMapIntensity = 0.5;
+
+        // Build matrices
+        const mFrame = [], mSill = [], mLintel = [], mDark = [], mLit = [];
+        const dummy = new THREE.Object3D();
+
+        for (let f = 1; f < floors; f++) {
+            const y = 5 + (f - 1) * 4;
+            const h = floorHeight;
+            createBox(width, h, depth, color, 0, y + h/2, 0, group);
+            createBox(width + 0.5, 0.5, depth + 0.5, '#554433', 0, y + h, 0, group);
+
+            for (let i = 0; i < winsX; i++) {
+                const wx = (i - (winsX - 1) / 2) * 4;
+                
+                dummy.position.set(wx, y + h/2, 0); dummy.updateMatrix();
+                mFrame.push(dummy.matrix.clone());
+                
+                dummy.position.set(wx, y + 0.5, 0); dummy.updateMatrix();
+                mSill.push(dummy.matrix.clone());
+                
+                dummy.position.set(wx, y + h - 0.8, 0); dummy.updateMatrix();
+                mLintel.push(dummy.matrix.clone());
+                
+                dummy.position.set(wx, y + h/2, 0); dummy.updateMatrix();
+                if (Math.random() < 0.25) {
+                    mLit.push(dummy.matrix.clone());
+                } else {
+                    mDark.push(dummy.matrix.clone());
+                }
+            }
+        }
+        
+        const fill = (geo, mat, mats) => {
+            if (mats.length === 0) return;
+            const m = new THREE.InstancedMesh(geo, mat, mats.length);
+            mats.forEach((mx, i) => m.setMatrixAt(i, mx));
+            m.castShadow = true; m.receiveShadow = true;
+            group.add(m);
+            return m;
+        };
+
+        fill(frameGeo, frameMat, mFrame);
+        fill(sillGeo, sillMat, mSill);
+        fill(lintelGeo, lintelMat, mLintel);
+        fill(glassGeo, glassMat, mDark);
+        
+        const litMesh = fill(glassGeo, litGlassMat, mLit);
+        if (litMesh) litMesh.userData = { isLitWindow: true };
+    }
+
+    const topY = 5 + (floors-1)*floorHeight;
+    createBox(width + 1.2, 1.5, depth + 1.2, '#332211', 0, topY + 0.75, 0, group);
+    createBox(width-2, 1, depth-2, '#222', 0, topY+0.1, 0, group);
+    createBox(4, 3, 4, '#555', 2, topY + 2.5, 2, group);
+    createCylinder(1.5, 1.5, 4, 16, '#8B4513', -3, topY + 2, -3, group); 
+    createCylinder(2, 2, 3, 16, '#8B4513', -3, topY + 4.5, -3, group); 
+
+    for(let f=1; f<floors; f++) {
+        const y = 5 + (f-1)*floorHeight;
+        createBox(width/2 + 1, 0.2, 4, '#111', width/4, y + 0.5, depth/2 + 0.6, group); 
+        const ladder = createBox(1, 5, 0.2, '#111', width/4 + 1, y + 2.5, depth/2 + 2.5, group);
+        ladder.rotation.z = -0.3;
+    }
+
+    if(scene) scene.add(group);
+};
+
+const createDetailedGlassTower = (x, z, floors, width, color, scene) => {
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+    
+    const floorHeight = 5;
+    const totalHeight = floors * floorHeight;
+
+    createBox(width-4, totalHeight, width-4, '#444', 0, totalHeight/2, 0, group);
+
+    // Lit Internal Rooms
+    const roomCount = Math.floor(floors * 2);
+    const roomGeo = new THREE.BoxGeometry(width - 5, floorHeight - 1, width - 5);
+    const roomMat = new THREE.MeshStandardMaterial({ color: '#FFFFEE', emissive: '#FFFFEE', emissiveIntensity: 0.0 });
+    const roomMesh = new THREE.InstancedMesh(roomGeo, roomMat, roomCount);
+    roomMesh.userData = { isLitWindow: true };
+    
+    const dummy = new THREE.Object3D();
+    let idx = 0;
+    for(let i=0; i<roomCount; i++) {
+        if (Math.random() > 0.4) continue;
+        const f = Math.floor(Math.random() * floors);
+        const y = f * floorHeight + floorHeight/2;
+        dummy.position.set(0, y, 0);
+        dummy.scale.set(0.8+Math.random()*0.2, 0.8, 0.8+Math.random()*0.2);
+        dummy.updateMatrix();
+        roomMesh.setMatrixAt(idx++, dummy.matrix);
+    }
+    roomMesh.count = idx;
+    roomMesh.instanceMatrix.needsUpdate = true;
+    group.add(roomMesh);
+
+    const glassMat = new THREE.MeshStandardMaterial({ 
+        color: color, 
+        transparent: true, 
+        opacity: 0.6, 
+        roughness: 0.1, 
+        metalness: 0.8 
+    });
+    
+    const glass = new THREE.Mesh(new THREE.BoxGeometry(width, totalHeight, width), glassMat);
+    glass.position.y = totalHeight/2;
+    group.add(glass);
+
+    for(let f=0; f<=floors; f++) {
+        const y = f * floorHeight;
+        createBox(width+0.4, 0.5, width+0.4, '#222', 0, y, 0, group); 
+    }
+    
+    const colW = 1.5;
+    createBox(colW, totalHeight, colW, '#222', width/2, totalHeight/2, width/2, group);
+    createBox(colW, totalHeight, colW, '#222', -width/2, totalHeight/2, width/2, group);
+    createBox(colW, totalHeight, colW, '#222', width/2, totalHeight/2, -width/2, group);
+    createBox(colW, totalHeight, colW, '#222', -width/2, totalHeight/2, -width/2, group);
+    
+    const numMullions = 3;
+    for(let m=1; m<numMullions; m++) {
+        const xOff = -width/2 + (width/numMullions)*m;
+        createBox(0.3, totalHeight, 0.3, '#333', xOff, totalHeight/2, width/2+0.1, group);
+        createBox(0.3, totalHeight, 0.3, '#333', xOff, totalHeight/2, -width/2-0.1, group);
+    }
+
+    createCylinder(0.5, 0.1, 12, 8, '#888', 0, totalHeight + 6, 0, group); 
+    createBox(width-2, 3, width-2, '#222', 0, totalHeight + 1.5, 0, group); 
+    const beacon = createBox(0.5, 0.5, 0.5, 'red', 0, totalHeight + 12, 0, group);
+    beacon.material.emissive = new THREE.Color('red');
+    beacon.material.emissiveIntensity = 2;
+
+    if(scene) scene.add(group);
+}
+
+const createBrutalistBlock = (x, z, height, width, scene) => {
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+    createBox(width, height, width, '#999', 0, height/2, 0, group);
+    const rows = Math.floor(height / 6);
+    for(let i=1; i<rows; i++) {
+        const y = i * 6;
+        createBox(width+0.2, 2, width+0.2, '#111', 0, y, 0, group);
+        for(let k=0; k<5; k++) {
+             createBox(1, 6, 1.5, '#999', (k-2)*(width/5), y, width/2, group);
+        }
+    }
+    if(scene) scene.add(group);
+}
+
+const createStackedApartments = (x, z, scene) => {
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+    createBox(10, 60, 10, '#333', 0, 30, 0, group);
+    const numBlocks = 8;
+    for(let i=0; i<numBlocks; i++) {
+        const y = 5 + (i * 7);
+        const w = 12 + Math.random() * 4;
+        const d = 12 + Math.random() * 4;
+        const xOff = (Math.random() - 0.5) * 4;
+        const zOff = (Math.random() - 0.5) * 4;
+        const color = i % 2 === 0 ? '#EFEFEF' : '#DDDDDD';
+        createBox(w, 6, d, color, xOff, y + 3, zOff, group);
+        createBox(w + 0.2, 2, d + 0.2, '#222', xOff, y + 4, zOff, group);
+        const bx = xOff + (Math.random() > 0.5 ? w/2 : -w/2);
+        createBox(2, 1, d * 0.8, '#555', bx, y + 1, zOff, group); 
+        
+        // Window Box
+        const win = createBox(2, 2, 0.2, '#88CCFF', bx, y + 2, zOff + d/2 - 0.5, group);
+        // Sometimes lit
+        if (Math.random() > 0.5) {
+             win.material = win.material.clone();
+             win.material.transparent = true;
+             win.userData = { isLitWindow: true };
+        } else {
+             win.material.transparent = true;
+        }
+    }
+    if (scene) scene.add(group);
+};
+
+const createArmory = (x, y, z, parent) => {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    const width = 80;
+    const depth = 50;
+    const height = 18;
+    const beige = '#D8C8B8';
+    createBox(width, height, depth, beige, 0, height/2, 0, g);
+    const roofH = 8;
+    createBox(width - 4, 1, depth - 4, '#555', 0, height + 0.5, 0, g);
+    createBox(width/2, 4, depth/2, beige, 0, height + 3, 0, g);
+    createBox(width/2 + 1, 0.5, depth/2 + 1, '#444', 0, height + 5.25, 0, g);
+    const winsX = 10;
+    const winsZ = 6;
+    for(let i=0; i<winsX; i++) {
+        const wx = (i - (winsX-1)/2) * 6;
+        createBox(3, 10, 0.5, '#222', wx, height/2, depth/2 + 0.1, g);
+        createBox(3, 10, 0.5, '#222', wx, height/2, -depth/2 - 0.1, g);
+    }
+    for(let i=0; i<winsZ; i++) {
+        const wz = (i - (winsZ-1)/2) * 6;
+        createBox(0.5, 10, 3, '#222', -width/2 - 0.1, height/2, wz, g);
+        createBox(0.5, 10, 3, '#222', width/2 + 0.1, height/2, wz, g);
+    }
+    createBox(20, 3, 1, '#8B0000', 0, height - 3, depth/2 + 0.5, g);
+    parent.add(g);
+};
+
+const createMuralAmphitheater = (x, y, z, parent) => {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    g.rotation.y = -Math.PI / 3; // Align nicely with the corner of the map
+
+    // 1. The Horiuchi Mural Wall
+    const muralGroup = new THREE.Group();
+    // Move wall back slightly
+    muralGroup.position.z = -15;
+    g.add(muralGroup);
+
+    const radius = 50;
+    const height = 24;
+    const segments = 20;
+    const arc = Math.PI / 2.5;
+    
+    // Abstract Horiuchi palette: Rust, Dark Green-Grey, Light Greys, Gold
+    const colors = ['#8B2E2E', '#2F4F4F', '#A9A9A9', '#DCDCDC', '#1C1C1C', '#D4AF37']; 
+
+    for(let i=0; i<=segments; i++) {
+        const pct = i/segments;
+        const angle = -arc/2 + pct * arc;
+        const xPos = Math.sin(angle) * radius;
+        const zPos = Math.cos(angle) * radius - radius;
+        
+        const segWidth = (arc * radius) / segments + 0.5;
+        
+        const column = new THREE.Group();
+        column.position.set(xPos, 0, zPos);
+        column.rotation.y = angle;
+        
+        // Backing
+        createBox(segWidth, height, 2, '#999', 0, height/2, 0, column);
+        
+        // Mosaic Tiles
+        const numTiles = 8;
+        const tileH = height / numTiles;
+        for(let k=0; k<numTiles; k++) {
+            const col = colors[Math.floor(Math.random() * colors.length)];
+            // Randomly offset depth for texture
+            const depth = 0.5 + Math.random() * 0.5;
+            createBox(segWidth * 0.95, tileH * 0.95, depth, col, 0, k*tileH + tileH/2, 1, column);
+        }
+        
+        muralGroup.add(column);
+    }
+    
+    // Support structure legs
+    createBox(3, height, 3, '#444', -20, height/2, -5, muralGroup);
+    createBox(3, height, 3, '#444', 20, height/2, -5, muralGroup);
+
+    // 2. Stage
+    const stageW = 40;
+    const stageD = 20;
+    const stageH = 3;
+    const stage = new THREE.Group();
+    stage.position.set(0, 0, 10);
+    g.add(stage);
+    
+    createBox(stageW, stageH, stageD, '#222', 0, stageH/2, 0, stage); // Base
+    createBox(stageW-2, 0.2, stageD-2, '#111', 0, stageH + 0.1, 0, stage); // Floor
+    
+    // Stage Truss
+    const trussColor = '#111';
+    createBox(1, 16, 1, trussColor, -18, 8, -8, stage);
+    createBox(1, 16, 1, trussColor, 18, 8, -8, stage);
+    createBox(1, 16, 1, trussColor, -18, 8, 8, stage);
+    createBox(1, 16, 1, trussColor, 18, 8, 8, stage);
+    createBox(38, 1, 18, trussColor, 0, 16, 0, stage); // Top frame
+    
+    // Lights
+    const lightBar = createBox(30, 0.5, 0.5, '#FFF', 0, 15.5, 8, stage);
+    lightBar.material.emissive = new THREE.Color('#FFFFE0');
+    lightBar.material.emissiveIntensity = 2;
+
+    // 3. Pool/Moat
+    createBox(60, 0.5, 15, '#224466', 0, 0.2, 0, g); // Under stage water hint
+
+    // 4. Lawn
+    const lawnGroup = new THREE.Group();
+    lawnGroup.position.set(0, 0, 40);
+    g.add(lawnGroup);
+    
+    const lawnW = 80;
+    const lawnL = 80;
+    const slope = -0.15;
+    
+    // Create stepped grass for voxel feel instead of smooth plane
+    const steps = 20;
+    const stepL = lawnL / steps;
+    const stepH = (Math.tan(Math.abs(slope)) * lawnL) / steps;
+    
+    for(let i=0; i<steps; i++) {
+        const yPos = i * stepH;
+        const zPos = i * stepL;
+        const grass = createBox(lawnW, stepH + 1, stepL + 0.5, '#3A5F0B', 0, yPos, zPos, lawnGroup);
+        
+        // Random Audience
+        if (Math.random() > 0.6) {
+             const px = (Math.random() - 0.5) * (lawnW - 5);
+             createBox(1.5, 1.5, 1.5, colors[Math.floor(Math.random()*colors.length)], px, yPos + stepH/2 + 0.75, zPos, lawnGroup);
+        }
+    }
+    
+    // Side concrete walls for lawn
+    const wallL = Math.sqrt(lawnL*lawnL + (lawnL*Math.tan(Math.abs(slope)))**2);
+    const wallLeft = createBox(2, 4, wallL, '#888', -lawnW/2 - 1, (steps*stepH)/2, lawnL/2, lawnGroup);
+    wallLeft.rotation.x = slope;
+    const wallRight = createBox(2, 4, wallL, '#888', lawnW/2 + 1, (steps*stepH)/2, lawnL/2, lawnGroup);
+    wallRight.rotation.x = slope;
+
+    parent.add(g);
+};
+
+const createChihulyGarden = (x, y, z, parent) => {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    const ghW = 20;
+    const ghH = 25;
+    const ghD = 40;
+    const frameColor = '#333';
+    for(let i=0; i<6; i++) {
+        const zPos = (i - 2.5) * 7;
+        const arch = new THREE.Group();
+        arch.position.z = zPos;
+        createBox(1, 15, 1, frameColor, -ghW/2, 7.5, 0, arch);
+        createBox(1, 15, 1, frameColor, ghW/2, 7.5, 0, arch);
+        const beamL = createBox(1, 12, 1, frameColor, -ghW/4, 19, 0, arch);
+        beamL.rotation.z = -0.5;
+        const beamR = createBox(1, 12, 1, frameColor, ghW/4, 19, 0, arch);
+        beamR.rotation.z = 0.5;
+        g.add(arch);
+    }
+    const glass = createBox(ghW-1, ghH, ghD-1, '#ADD8E6', 0, ghH/2, 0, g);
+    glass.material.transparent = true;
+    glass.material.opacity = 0.3;
+    const sculpG = new THREE.Group();
+    sculpG.position.y = 18;
+    for(let i=0; i<30; i++) {
+        const t = i/30;
+        const sx = Math.sin(t * Math.PI * 4) * 4;
+        const sz = (t - 0.5) * 30;
+        const sy = Math.cos(t * Math.PI * 2) * 2;
+        const color = t < 0.3 ? '#FF4500' : (t < 0.6 ? '#FFA500' : '#FFFF00'); 
+        createBox(1.5, 1.5, 1.5, color, sx, sy, sz, sculpG).rotation.set(Math.random(), Math.random(), Math.random());
+    }
+    g.add(sculpG);
+    for(let i=0; i<20; i++) {
+        const rx = (Math.random() - 0.5) * 50;
+        const rz = (Math.random() - 0.5) * 50;
+        if (Math.abs(rx) < 12 && Math.abs(rz) < 22) continue;
+        const h = 5 + Math.random() * 8;
+        const col = Math.random() > 0.5 ? '#8A2BE2' : '#4169E1'; 
+        createCylinder(0.2, 0.2, h, 6, col, rx, h/2, rz, g);
+    }
+    for(let i=0; i<10; i++) {
+        const sx = (Math.random() - 0.5) * 40;
+        const sz = (Math.random() - 0.5) * 40;
+        if (Math.abs(sx) < 12 && Math.abs(sz) < 22) continue;
+        createBox(1.5, 1.5, 1.5, '#FFD700', sx, 0.75, sz, g);
+    }
+    parent.add(g);
+};
+
+const createTunnelEntrance = (x, z, parent) => {
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+    const w = 32; 
+    const h = 12; 
+    const d = 10; 
+    createBox(4, h, d, '#555', -w/2 + 2, h/2, 0, group);
+    createBox(4, h, d, '#555', w/2 - 2, h/2, 0, group);
+    createBox(w, 4, d, '#555', 0, h - 2, 0, group);
+    
+    // Shortened sign width from 22 to 15 to avoid track collision
+    createBox(15, 2.5, 1, '#1a472a', 0, h + 1.25, d/2, group); 
+    // Shortened strip width from 18 to 12
+    createBox(12, 0.4, 1.2, '#DDD', 0, h + 1.25, d/2, group); 
+    
+    createBox(w - 8, h - 4, 40, '#050505', 0, (h-4)/2, -20, group);
+    const wingL = createBox(2, h-4, 10, '#555', -w/2 - 1, (h-4)/2, 5, group);
+    wingL.rotation.y = -0.2;
+    const wingR = createBox(2, h-4, 10, '#555', w/2 + 1, (h-4)/2, 5, group);
+    wingR.rotation.y = 0.2;
+    const lightGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.2, 16);
+    const lightMat = new THREE.MeshStandardMaterial({ color: '#FFD700', emissive: '#FFD700', emissiveIntensity: 2 });
+    const l1 = new THREE.Mesh(lightGeo, lightMat);
+    l1.rotation.x = Math.PI/2;
+    l1.position.set(-w/2 + 2, h - 4, d/2 + 0.1);
+    group.add(l1);
+    const l2 = new THREE.Mesh(lightGeo, lightMat);
+    l2.rotation.x = Math.PI/2;
+    l2.position.set(w/2 - 2, h - 4, d/2 + 0.1);
+    group.add(l2);
+    parent.add(group);
+};
+
+const createFifthAvePavement = (scene) => {
+    const voxels = [];
+    const voxelSize = 0.5;
+    
+    // Color Palette
+    const C_ASPHALT = new THREE.Color('#333333');
+    const C_ASPHALT_DARK = new THREE.Color('#2a2a2a');
+    const C_ASPHALT_PATCH = new THREE.Color('#3a3a3a');
+    const C_MARKING_WHITE = new THREE.Color('#EEEEEE');
+    const C_MARKING_YELLOW = new THREE.Color('#FFD700');
+    const C_CONCRETE = new THREE.Color('#AAAAAA');
+    const C_CONCRETE_LIGHT = new THREE.Color('#CCCCCC');
+    const C_PAVER_DARK = new THREE.Color('#999999');
+    const C_CURB = new THREE.Color('#999999');
+    const C_GRASS = new THREE.Color('#3A5F0B');
+
+    // Helper to add voxel
+    const addVoxel = (x, y, z, color) => {
+        voxels.push({x, y, z, color});
+    };
+
+    // Bounds matching the gap in ground planes
+    const minX = -10;
+    const maxX = 30;
+    const minZ = -230;
+    // Extended maxZ to 100 to cover the Westlake tunnel ramp
+    const maxZ = 100;
+
+    for (let z = maxZ; z >= minZ; z -= voxelSize) {
+        // Ramp Logic: The road dips down to form the tunnel entrance
+        let ySurface = 0;
+        let isRamp = false;
+
+        if (z < -140) {
+            isRamp = true;
+            // Ramp goes from Z=-140 (Y=0) to Z=-230 (Y approx -12)
+            const rampLen = -230 - (-140); // -90
+            const dist = z - (-140); // negative
+            const t = dist / rampLen; // 0 to 1
+            ySurface = -12 * t; 
+        } else if (z > 40) {
+             isRamp = true;
+             // South Ramp (Westlake): z > 40. Goes down to z=80 (approx)
+             const rampLen = 80 - 40;
+             const dist = z - 40;
+             const t = Math.min(1, dist / rampLen);
+             ySurface = -12 * t;
+        }
+
+        for (let x = minX; x <= maxX; x += voxelSize) {
+            let color = null;
+            let y = ySurface;
+            
+            // Areas definition (Road width 24 units: -2 to 22)
+            const isRoad = (x >= -2 && x <= 22);
+            const isLeftSidewalk = (x >= -10 && x < -2);
+            const isRightSidewalk = (x > 22 && x <= 30);
+
+            if (isRamp) {
+                // In the ramp zone, road follows slope, sidewalks stay up to form walls
+                if (!isRoad) y = 0; 
+            }
+
+            // Sidewalks are raised
+            if (y === 0 && (isLeftSidewalk || isRightSidewalk)) {
+                y = 0.25; 
+            }
+
+            // Determine Color
+            if (isLeftSidewalk || isRightSidewalk) {
+                 // Paver Pattern (Checkerboard on 1m grid)
+                 const vx = Math.floor(x * 2); 
+                 const vz = Math.floor(z * 2);
+                 if ((vx + vz) % 2 === 0) color = C_CONCRETE_LIGHT;
+                 else color = C_PAVER_DARK;
+                 
+                 // Curb edge
+                 if (Math.abs(x - (-2)) < 0.5 || Math.abs(x - 22) < 0.5) color = C_CURB;
+                 
+                 // Planters with grass (Periodic along Z)
+                 if (Math.abs(z % 25) < 2.5) {
+                     // Left planter or Right planter
+                     if ((Math.abs(x - (-6)) < 1.5) || (Math.abs(x - 26) < 1.5)) color = C_GRASS;
+                 }
+            }
+            else if (isRoad) {
+                // Asphalt Base Pattern
+                 const n = Math.sin(x * 0.5) * Math.cos(z * 0.5);
+                 if (n > 0.5) color = C_ASPHALT_PATCH;
+                 else if (n < -0.5) color = C_ASPHALT_DARK;
+                 else color = C_ASPHALT;
+
+                 // --- MARKINGS ---
+                 // 1. Double Yellow Center Line (Around x=10)
+                 // Two lines at x=9.8 and x=10.2, separated by gap
+                 if (Math.abs(x - 9.7) < 0.2 || Math.abs(x - 10.3) < 0.2) {
+                     color = C_MARKING_YELLOW;
+                 }
+
+                 // 2. Dashed White Lane Dividers (Three lanes per direction roughly)
+                 // Left side lanes: x=4, Right side lanes: x=16
+                 if (Math.abs(x - 4) < 0.2 || Math.abs(x - 16) < 0.2) {
+                     if (Math.abs(z % 10) < 3) color = C_MARKING_WHITE;
+                 }
+
+                 // 3. Solid White Shoulder Lines (Near curbs x=-1.5 and x=21.5)
+                 if (Math.abs(x - (-1.5)) < 0.2 || Math.abs(x - 21.5) < 0.2) {
+                     color = C_MARKING_WHITE;
+                 }
+
+                 // 4. Crosswalks (Zebra Stripes) every 40 units
+                 if (Math.abs(z % 40) < 3) {
+                     // Stripe pattern across X
+                     if (Math.floor(x) % 2 === 0) color = C_MARKING_WHITE;
+                 }
+                 
+                 // 5. Stop Bars (Solid line before crosswalk)
+                 if (Math.abs(z % 40 - 4) < 0.5) {
+                     color = C_MARKING_WHITE;
+                 }
+            }
+
+            // Retaining Wall Filling for Ramp
+            // If we are in the ramp area, and at the edge of the sidewalk, fill down to road level
+            if (isRamp && (Math.abs(x - (-2)) < 0.5 || Math.abs(x - 22) < 0.5)) {
+                // Fill vertically from top (0) down to ySurface
+                for (let wy = -voxelSize; wy > ySurface; wy -= voxelSize) {
+                    addVoxel(x, wy, z, C_CONCRETE_LIGHT);
+                }
+            }
+            
+            if (color) {
+                addVoxel(x, y, z, color);
+            }
+        }
+    }
+    
+    // Create Instanced Mesh
+    const geometry = new THREE.BoxGeometry(voxelSize, voxelSize, voxelSize);
+    const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 });
+    const mesh = new THREE.InstancedMesh(geometry, material, voxels.length);
+    
+    const dummy = new THREE.Object3D();
+    const _color = new THREE.Color();
+    
+    voxels.forEach((v, i) => {
+        dummy.position.set(v.x, v.y, v.z);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+        mesh.setColorAt(i, v.color);
+    });
+    
+    mesh.receiveShadow = true;
+    mesh.castShadow = true;
+    scene.add(mesh);
+    return mesh;
+};
+
+function createSteppedLobe(scene, center, dimensions, colorHex, matParams, shapeFn, parent, exclusionFn) {
+    const { w, h, d } = dimensions;
+    const voxelSize = 1.25; 
+    const voxels = [];
+    const grid = new Map();
+
+    for(let y = 0; y < h; y += voxelSize) {
+        for(let x = -w; x <= w; x += voxelSize) {
+            for(let z = -d; z <= d; z += voxelSize) {
+                let nx = x / w;
+                let ny = (y - h/2) / (h/2);
+                let nz = z / d;
+                
+                if (shapeFn(nx, ny, nz)) {
+                    // Exclusion Check
+                    const vx = center.x + x;
+                    const vy = center.y + y;
+                    const vz = center.z + z;
+                    if (exclusionFn && exclusionFn(vx, vy, vz)) {
+                        continue;
+                    }
+
+                    const ix = Math.round(x / voxelSize);
+                    const iy = Math.round(y / voxelSize);
+                    const iz = Math.round(z / voxelSize);
+                    const key = `${ix},${iy},${iz}`;
+                    
+                    grid.set(key, { 
+                        x: vx, 
+                        y: vy, 
+                        z: vz 
+                    });
+                }
+            }
+        }
+    }
+
+    grid.forEach((val, key) => {
+        const [ix, iy, iz] = key.split(',').map(Number);
+        const neighbors = [
+            `${ix+1},${iy},${iz}`, `${ix-1},${iy},${iz}`, `${ix},${iy+1},${iz}`,
+            `${ix},${iy-1},${iz}`, `${ix},${iy},${iz+1}`, `${ix},${iy},${iz-1}`
+        ];
+        if (neighbors.some(nKey => !grid.has(nKey))) {
+            voxels.push(val);
+        }
+    });
+
+    const material = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(colorHex),
+        ...matParams
+    });
+
+    const geometry = new THREE.BoxGeometry(voxelSize, voxelSize, voxelSize);
+    const mesh = new THREE.InstancedMesh(geometry, material, voxels.length);
+    const dummy = new THREE.Object3D();
+    
+    voxels.forEach((v, i) => {
+        dummy.position.set(v.x, v.y, v.z);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+    });
+    
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    parent.add(mesh);
+}
+
+
+const NEEDLE_PALETTE = {
+  LEG_WHITE: '#FFFFFF',        
+  CORE_CONCRETE: '#DDDDDD',    
+  GLASS_BLUE: '#AACCFF',       
+  GALAXY_GOLD: '#FF9900', // Galaxy Gold is actually Orange
+  WARNING_RED: '#FF3333',      
+  DARK_STEEL: '#444444',       
+  ELEVATOR_RED: '#D03030',
+  ELEVATOR_YELLOW: '#F0C000',
+  ELEVATOR_BLUE: '#3060D0',
+  INTERIOR_FLOOR: '#222222', // Dark modern carpet
+  INTERIOR_WALL: '#EEEEEE',  // Clean core walls
+  FURNITURE_WOOD: '#8B5A2B', // Warm wood accents
+  KIOSK_SCREEN: '#00AAFF',   // Info screens
+  GLASS_FLOOR: '#99CCFF',
+  GLASS_BARRIER: '#E0F5FF',
+  BENCH_GLASS: '#DDEEFF'
+};
+
+const DEG2RAD = Math.PI / 180;
+const rotatePoint = (x, z, angleDeg) => {
+  const rad = angleDeg * DEG2RAD;
+  const c = Math.cos(rad);
+  const s = Math.sin(rad);
+  return { x: x * c - z * s, z: x * s + z * c };
+};
+
+const generateNeedleVoxels = () => {
+  const solidVoxels = [];
+  const glassVoxels = [];
+  const rotatingVoxels = [];
+  const rotatingGlassVoxels = []; // New array for rotating glass
+
+  const add = (x, y, z, color, type = 'solid') => {
+    const v = { x: Math.round(x), y: Math.round(y), z: Math.round(z), color };
+    if (type === 'glass') glassVoxels.push(v);
+    else if (type === 'rotating') rotatingVoxels.push(v);
+    else if (type === 'rotatingGlass') rotatingGlassVoxels.push(v);
+    else solidVoxels.push(v);
+  };
+  const addTri = (x, y, z, color, type = 'solid') => {
+    for (let angle of [0, 120, 240]) {
+      const p = rotatePoint(x, z, angle);
+      add(p.x, y, p.z, color, type);
+    }
+  };
+  const addHex = (x, y, z, color, type = 'solid') => {
+    for (let i = 0; i < 6; i++) {
+      const p = rotatePoint(x, z, i * 60);
+      add(p.x, y, p.z, color, type);
+    }
+  };
+
+  const LEVEL_GROUND = 0;
+  const LEVEL_SKYLINE = 80;
+  const LEVEL_WAIST = 300;
+  const LEVEL_SOFFIT_START = 400;
+  const LEVEL_LOUPE_FLOOR = 415; // Lower level
+  const LEVEL_OPEN_DECK_FLOOR = 428; // Upper level
+  const LEVEL_ROOF_BRIM = 442;
+  const LEVEL_ROOF_PEAK = 460;
+  
+  // -- LEGS AND WAIST (Keep as is) --
+  for (let y = -40; y <= 0; y++) {
+    const t = (y + 40) / 40; 
+    const r = 80 * (1 - t * 0.5); 
+    for (let dx = -r; dx <= r; dx+=2) {
+      for (let dz = -r; dz <= r; dz+=2) {
+        const dist = Math.sqrt(dx*dx + dz*dz);
+        if (dist < r && (dist > r - 3 || y === 0)) {
+             add(dx, y, dz, NEEDLE_PALETTE.CORE_CONCRETE);
+        }
+      }
+    }
+  }
+
+  for (let y = 0; y < 25; y++) {
+      const r = 55;
+      for (let d = 0; d < 360; d+=2) {
+          const p = rotatePoint(r, 0, d);
+          add(p.x, y, p.z, NEEDLE_PALETTE.GLASS_BLUE, 'glass');
+      }
+      if (y===24) {
+        for(let d=0; d<360; d+=1) {
+            const p = rotatePoint(r, 0, d);
+            add(p.x, y, p.z, NEEDLE_PALETTE.LEG_WHITE);
+        }
+      }
+  }
+
+  for (let y = 0; y < LEVEL_SOFFIT_START; y++) {
+    const coreRad = 8;
+    addHex(coreRad, y, 0, NEEDLE_PALETTE.CORE_CONCRETE);
+    addHex(coreRad - 1, y, 0, NEEDLE_PALETTE.CORE_CONCRETE);
+    if (y < LEVEL_SOFFIT_START - 20) {
+      const trackDist = 9;
+      const p = rotatePoint(trackDist, 0, 60); 
+      addTri(p.x, y, p.z, NEEDLE_PALETTE.DARK_STEEL);
+    }
+  }
+  
+  const SKYLINE_HEIGHT = 12;
+  const SKY_R_FLOOR = 46;
+  const SKY_R_ROOF = 50;
+  for (let y = LEVEL_SKYLINE; y <= LEVEL_SKYLINE + SKYLINE_HEIGHT; y++) {
+      if (y === LEVEL_SKYLINE) {
+          for(let r=12; r<=SKY_R_FLOOR; r++) {
+             for(let d=0; d<360; d+=1) {
+                 const p = rotatePoint(r, 0, d);
+                 add(p.x, y, p.z, NEEDLE_PALETTE.LEG_WHITE);
+             }
+          }
+      }
+      if (y === LEVEL_SKYLINE + SKYLINE_HEIGHT) {
+          for(let r=12; r<=SKY_R_ROOF; r++) {
+             for(let d=0; d<360; d+=1) {
+                 const p = rotatePoint(r, 0, d);
+                 add(p.x, y, p.z, NEEDLE_PALETTE.LEG_WHITE);
+             }
+          }
+      }
+      if (y > LEVEL_SKYLINE && y < LEVEL_SKYLINE + SKYLINE_HEIGHT) {
+          for (let d = 0; d < 360; d+=0.8) {
+             const p = rotatePoint(SKY_R_FLOOR, 0, d);
+             add(p.x, y, p.z, NEEDLE_PALETTE.GLASS_BLUE, 'glass');
+          }
+          if (y % 4 === 0) {
+             for(let d=0; d<360; d+=30) {
+                 const p = rotatePoint(SKY_R_FLOOR-2, 0, d);
+                 add(p.x, y, p.z, NEEDLE_PALETTE.LEG_WHITE);
+             }
+          }
+      }
+  }
+
+  for (let y = 0; y <= LEVEL_SOFFIT_START; y++) {
+    let r;
+    if (y < LEVEL_WAIST) {
+       const t = y / LEVEL_WAIST;
+       r = 15 + 60 * Math.pow(1 - t, 2.5);
+    } else {
+       const t = (y - LEVEL_WAIST) / (LEVEL_SOFFIT_START - LEVEL_WAIST);
+       r = 15 + 40 * Math.pow(t, 2); 
+    }
+    const colOffset = 6; 
+    for (let dr = 0; dr < 3; dr++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        addTri(r + dr, y, -colOffset + dz, NEEDLE_PALETTE.LEG_WHITE);
+      }
+    }
+    for (let dr = 0; dr < 3; dr++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        addTri(r + dr, y, colOffset + dz, NEEDLE_PALETTE.LEG_WHITE);
+      }
+    }
+    const bracePeriod = 20;
+    const localY = y % bracePeriod;
+    const t = localY / bracePeriod;
+    const z1 = -colOffset + (t * colOffset * 2);
+    addTri(r, y, z1, NEEDLE_PALETTE.LEG_WHITE);
+    addTri(r+1, y, z1, NEEDLE_PALETTE.LEG_WHITE); 
+    const z2 = colOffset - (t * colOffset * 2);
+    addTri(r, y, z2, NEEDLE_PALETTE.LEG_WHITE);
+    addTri(r+1, y, z2, NEEDLE_PALETTE.LEG_WHITE); 
+    if (localY < 2) {
+       for(let z=-colOffset; z<=colOffset; z++) {
+          addTri(r, y, z, NEEDLE_PALETTE.LEG_WHITE);
+          addTri(r+1, y, z, NEEDLE_PALETTE.LEG_WHITE);
+       }
+    }
+  }
+
+  for (let d = 0; d < 360; d+=0.5) {
+      const p = rotatePoint(55, 0, d);
+      add(p.x, LEVEL_SOFFIT_START, p.z, NEEDLE_PALETTE.LEG_WHITE);
+  }
+
+  // -- SOFFIT CURVE --
+  for (let y = LEVEL_SOFFIT_START; y < LEVEL_LOUPE_FLOOR; y++) {
+    const t = (y - LEVEL_SOFFIT_START) / (LEVEL_LOUPE_FLOOR - LEVEL_SOFFIT_START); 
+    const rOuter = 50 + (t * 30); 
+    const rInner = 8;
+    for (let i = 0; i < 48; i++) {
+        const angle = i * (360/48);
+        const steps = 10;
+        for (let s=0; s<=steps; s++) {
+            const st = s/steps;
+            const rCurrent = rInner + (rOuter - rInner) * st;
+            const curveHeight = Math.pow(st, 0.5);
+            if (t > (1-curveHeight) * 0.2) { 
+                 const p = rotatePoint(rCurrent, 0, angle);
+                 add(p.x, y, p.z, NEEDLE_PALETTE.LEG_WHITE);
+            }
+        }
+    }
+  }
+
+  // -- THE LOUPE (LOWER LEVEL) --
+  // Rotating Glass Floor & Floor-to-Ceiling Glass Walls
+  for (let y = LEVEL_LOUPE_FLOOR; y < LEVEL_OPEN_DECK_FLOOR; y++) {
+      const isFloor = y === LEVEL_LOUPE_FLOOR;
+      const isCeiling = y === LEVEL_OPEN_DECK_FLOOR - 1;
+      
+      // -- FLOOR --
+      if (isFloor) {
+          // 1. Stationary Core (Carpet/Concrete)
+          for (let r=10; r<60; r+=2) {
+             for (let d=0; d<360; d+=2) {
+                 const p = rotatePoint(r, 0, d);
+                 add(p.x, y, p.z, NEEDLE_PALETTE.INTERIOR_FLOOR);
+             }
+          }
+          // 2. The Loupe (Rotating Glass Floor)
+          for (let r=60; r<78; r+=1) {
+             for (let d=0; d<360; d+=1) {
+                 const p = rotatePoint(r, 0, d);
+                 // Radial lines to emphasize rotation
+                 const isRib = d % 15 === 0;
+                 if (isRib) {
+                     add(p.x, y, p.z, '#FFFFFF', 'rotating'); // Solid rib - White for contrast
+                 } else {
+                     add(p.x, y, p.z, NEEDLE_PALETTE.GLASS_FLOOR, 'rotatingGlass');
+                 }
+             }
+          }
+          // 3. Stationary Outer Rim
+          for (let r=78; r<80; r+=1) {
+             for (let d=0; d<360; d+=2) {
+                 const p = rotatePoint(r, 0, d);
+                 add(p.x, y, p.z, NEEDLE_PALETTE.DARK_STEEL);
+             }
+          }
+      }
+
+      // -- CEILING (To block light leakage) --
+      if (isCeiling) {
+          for (let r=10; r<80; r+=2) {
+             for (let d=0; d<360; d+=2) {
+                 const p = rotatePoint(r, 0, d);
+                 add(p.x, y, p.z, NEEDLE_PALETTE.INTERIOR_WALL);
+             }
+          }
+      }
+
+      // -- INTERIOR KIOSKS & FURNITURE --
+      // Stationary Inner Ring (r < 60)
+      if (y >= LEVEL_LOUPE_FLOOR + 1 && y <= LEVEL_LOUPE_FLOOR + 4) {
+          // Central Core Walls with gaps for elevators
+          const elevatorAngles = [60, 180, 300];
+          for (let d=0; d<360; d+=2) {
+             let isDoorway = false;
+             for(let ang of elevatorAngles) {
+                 let diff = Math.abs(d - ang);
+                 if (diff > 180) diff = 360 - diff;
+                 if (diff < 9) { // +/- 9 degrees gap for elevator doors
+                     isDoorway = true;
+                     break;
+                 }
+             }
+
+             if (!isDoorway) {
+                 const p = rotatePoint(16, 0, d);
+                 add(p.x, y, p.z, NEEDLE_PALETTE.INTERIOR_WALL);
+             }
+          }
+
+          // Information Kiosks (every 60 degrees)
+          for (let k=0; k<6; k++) {
+              const angle = k * 60 + 15;
+              const rKiosk = 45;
+              // Main Body
+              for (let w=-2; w<=2; w++) {
+                  const p = rotatePoint(rKiosk + w, 0, angle);
+                  add(p.x, y, p.z, NEEDLE_PALETTE.KIOSK_SCREEN);
+              }
+              // Wooden Counter
+              if (y === LEVEL_LOUPE_FLOOR + 1) {
+                   const p = rotatePoint(rKiosk, 0, angle);
+                   add(p.x, y, p.z, NEEDLE_PALETTE.FURNITURE_WOOD);
+              }
+          }
+      }
+
+      // -- EXTERIOR WALLS --
+      // Slight outward slope
+      const t = (y - LEVEL_LOUPE_FLOOR) / (LEVEL_OPEN_DECK_FLOOR - LEVEL_LOUPE_FLOOR);
+      const r = 80 + t * 4; // 80 -> 84
+
+      // Glass Curtain Wall
+      for (let d=0; d<360; d+=0.6) {
+          const p = rotatePoint(r, 0, d);
+          add(p.x, y, p.z, NEEDLE_PALETTE.GLASS_BLUE, 'glass');
+      }
+      
+      // Structural Mullions
+      if (y % 6 === 0) {
+         for (let d=0; d<360; d+=15) {
+             const p = rotatePoint(r-1, 0, d);
+             add(p.x, y, p.z, NEEDLE_PALETTE.DARK_STEEL);
+         }
+      }
+  }
+
+  // -- OUTDOOR OBSERVATION DECK (UPPER LEVEL) --
+  // Open Air, Angled Glass Barriers, Glass Benches
+  for (let y = LEVEL_OPEN_DECK_FLOOR; y < LEVEL_ROOF_BRIM; y++) {
+      const isFloor = y === LEVEL_OPEN_DECK_FLOOR;
+
+      // -- FLOOR --
+      if (isFloor) {
+          for (let r=12; r<84; r+=2) {
+             for (let d=0; d<360; d+=2) {
+                 const p = rotatePoint(r, 0, d);
+                 add(p.x, y, p.z, '#BBBBBB'); // Concrete deck
+             }
+          }
+      }
+
+      // -- INTERIOR BENCHES (Stationary) --
+      if (y >= LEVEL_OPEN_DECK_FLOOR + 1 && y <= LEVEL_OPEN_DECK_FLOOR + 2) {
+          for (let b=0; b<12; b++) {
+              const angle = b * 30;
+              // Wooden Benches facing out
+              const rBench = 75;
+              for(let w=-2; w<=2; w++) {
+                 const p = rotatePoint(rBench, w, angle);
+                 add(p.x, y, p.z, NEEDLE_PALETTE.FURNITURE_WOOD);
+              }
+          }
+      }
+
+      // -- LEANING GLASS BARRIER --
+      // Leans outward significantly: 84 -> 92
+      const t = (y - LEVEL_OPEN_DECK_FLOOR) / (LEVEL_ROOF_BRIM - LEVEL_OPEN_DECK_FLOOR);
+      const r = 84 + t * 8;
+
+      // Barrier Wall
+      for (let d=0; d<360; d+=0.6) {
+          const p = rotatePoint(r, 0, d);
+          add(p.x, y, p.z, NEEDLE_PALETTE.GLASS_BARRIER, 'glass');
+      }
+
+      // -- GLASS BENCHES (Skyrisers) --
+      // Leaning glass benches near the bottom of the wall
+      if (y >= LEVEL_OPEN_DECK_FLOOR && y <= LEVEL_OPEN_DECK_FLOOR + 3) {
+          const benchR = r - 1.5;
+          for (let d=0; d<360; d+=1) {
+              // Intermittent benches
+              if (d % 20 < 12) {
+                  const p = rotatePoint(benchR, 0, d);
+                  add(p.x, y, p.z, NEEDLE_PALETTE.BENCH_GLASS, 'glass');
+              }
+          }
+      }
+
+      // -- TOP RAIL --
+      if (y === LEVEL_ROOF_BRIM - 1) {
+           for (let d=0; d<360; d+=1) {
+               const p = rotatePoint(r, 0, d);
+               add(p.x, y, p.z, NEEDLE_PALETTE.DARK_STEEL);
+           }
+      }
+  }
+
+  // -- ROOF --
+  for (let y = LEVEL_ROOF_BRIM; y < LEVEL_ROOF_BRIM + 5; y++) {
+      const t = (y - LEVEL_ROOF_BRIM) / 5;
+      const r = 92 * (1 - t * 0.3); // Starts at 92, shrinks
+      for (let d = 0; d < 360; d+=1) {
+          const p = rotatePoint(r, 0, d);
+          add(p.x, y, p.z, NEEDLE_PALETTE.GALAXY_GOLD);
+      }
+      if (y % 2 === 0) {
+          for (let i=0; i<60; i++) {
+              const p = rotatePoint(r, 0, i*6);
+              add(p.x, y+0.5, p.z, NEEDLE_PALETTE.LEG_WHITE);
+          }
+      }
+  }
+
+  const MEZZ_START = LEVEL_ROOF_BRIM + 5;
+  for (let y = MEZZ_START; y < MEZZ_START + 12; y++) {
+      const t = (y - MEZZ_START) / 12;
+      const r = 64 * (1 - t * 0.5); 
+      for (let d = 0; d < 360; d+=2) {
+          const p = rotatePoint(r, 0, d);
+          add(p.x, y, p.z, NEEDLE_PALETTE.LEG_WHITE);
+      }
+      if (y % 3 === 0) {
+         for (let d = 0; d < 360; d+=6) {
+             const p = rotatePoint(r+1, 0, d);
+             add(p.x, y, p.z, NEEDLE_PALETTE.DARK_STEEL);
+         }
+      }
+  }
+
+  const CAP_START = MEZZ_START + 12;
+  for (let y = CAP_START; y < LEVEL_ROOF_PEAK; y++) {
+      const t = (y - CAP_START) / (LEVEL_ROOF_PEAK - CAP_START);
+      const r = 32 * (1 - t); 
+      for (let d = 0; d < 360; d+=4) {
+          const p = rotatePoint(r, 0, d);
+          add(p.x, y, p.z, NEEDLE_PALETTE.GALAXY_GOLD);
+      }
+  }
+
+  const SPIRE_HEIGHT = 90;
+  for (let y=0; y<SPIRE_HEIGHT; y++) {
+     const h = LEVEL_ROOF_PEAK + y;
+     if (y < 25) {
+         addHex(2, h, 0, NEEDLE_PALETTE.LEG_WHITE);
+         addHex(1, h, 0, NEEDLE_PALETTE.LEG_WHITE);
+         add(0, h, 0, NEEDLE_PALETTE.LEG_WHITE);
+     } 
+     else if (y < 80) {
+         addHex(1, h, 0, NEEDLE_PALETTE.DARK_STEEL);
+         add(0, h, 0, NEEDLE_PALETTE.DARK_STEEL);
+     }
+     else {
+         add(0, h, 0, NEEDLE_PALETTE.WARNING_RED);
+         addHex(1, h, 0, NEEDLE_PALETTE.WARNING_RED);
+     }
+     if (y === 30 || y === 60) {
+        for(let d=0; d<360; d+=20) {
+           const p = rotatePoint(4, 0, d);
+           add(p.x, h, p.z, NEEDLE_PALETTE.DARK_STEEL);
+        }
+     }
+  }
+
+  return { 
+      solid: solidVoxels, 
+      glass: glassVoxels, 
+      rotating: rotatingVoxels,
+      rotatingGlass: rotatingGlassVoxels 
+  };
+};
+
+class Elevator {
+  constructor(angle, color, speedOffset, parent, audioGenerator) {
+      this.angle = angle;
+      this.speedOffset = speedOffset;
+      this.state = {
+          y: 10,
+          targetY: 415,
+          velocity: 0,
+          mode: 'wait',
+          waitTime: Math.random() * 5 + speedOffset
+      };
+
+      this.group = new THREE.Group();
+      if (audioGenerator) {
+          // refDistance 20 -> Audible in city
+          const sound = audioGenerator.createPositionalAudio('ELEVATOR', 20, 300, 0.5);
+          if (sound) this.group.add(sound);
+      }
+      parent.add(this.group); 
+
+      this.soundDummy = new THREE.Object3D();
+      this.group.add(this.soundDummy);
+
+      // Create a dedicated group for the moving elevator car
+      // This allows us to move the whole car by changing .position.y
+      // instead of updating the InstancedMesh matrix every frame.
+      this.carGroup = new THREE.Group();
+      this.group.add(this.carGroup);
+
+      this.solidVoxels = [];
+      this.glassVoxels = [];
+      
+      const cBody = new THREE.Color(color);
+      const cDoor = new THREE.Color('#333333');
+      const cFloor = new THREE.Color('#1a1a1a');
+
+      for (let dy = 0; dy < 6; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          for (let dz = -1; dz <= 1; dz++) {
+            // Logic for Elevator Shape
+            // dx=1: Outer Face (Glass), dx=-1: Inner Face (Door/Solid)
+            const pLocal = rotatePoint(11 + dx, dz, angle);
+            
+            let type = 'solid';
+            let vColor = cBody;
+
+            if (dy === 0) { // Floor
+                type = 'solid'; vColor = cFloor;
+            } else if (dy === 5) { // Ceiling
+                type = 'solid'; vColor = cBody;
+            } else {
+                // Middle section
+                if (dx === 1) { // Outer Face
+                    type = 'glass';
+                } else if (dx === 0) { // Middle Slice
+                    if (dz === 0) {
+                        type = 'empty'; // Interior
+                    } else {
+                        type = 'glass'; // Side Windows
+                    }
+                } else { // Inner Face (dx = -1)
+                    if (dz === 0) {
+                        type = 'solid'; vColor = cDoor; // Door
+                    } else {
+                        type = 'solid'; vColor = cBody; // Corner columns
+                    }
+                }
+            }
+
+            if (type !== 'empty') {
+                // Note: We use pLocal.x/z but dy is local Y. 
+                // We add to voxels with local coordinates.
+                // The actual elevator car rotation is handled by voxel placement relative to center 
+                // but since we want to move it up/down, we build it at y=dy relative to carGroup.
+                const v = { x: pLocal.x, y: dy, z: pLocal.z, color: vColor };
+                if (type === 'glass') this.glassVoxels.push(v);
+                else this.solidVoxels.push(v);
+            }
+          }
+        }
+      }
+
+      const geo = new THREE.BoxGeometry(1, 1, 1);
+      // Use White material to allow instance colors to work correctly
+      const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5, metalness: 0.5 });
+      this.mesh = new THREE.InstancedMesh(geo, mat, this.solidVoxels.length);
+      
+      const dummy = new THREE.Object3D();
+      this.solidVoxels.forEach((v, i) => {
+          dummy.position.set(v.x, v.y, v.z);
+          dummy.updateMatrix();
+          this.mesh.setMatrixAt(i, dummy.matrix);
+          this.mesh.setColorAt(i, v.color);
+      });
+      // Set update flag once
+      this.mesh.instanceMatrix.needsUpdate = true;
+      if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+      this.carGroup.add(this.mesh);
+      
+      const glassMat = new THREE.MeshStandardMaterial({ 
+          color: '#add8e6', transparent: true, opacity: 0.4, roughness: 0.1, metalness: 0.9 
+      });
+      this.glassMesh = new THREE.InstancedMesh(geo, glassMat, this.glassVoxels.length);
+      
+      this.glassVoxels.forEach((v, i) => {
+          dummy.position.set(v.x, v.y, v.z);
+          dummy.updateMatrix();
+          this.glassMesh.setMatrixAt(i, dummy.matrix);
+      });
+      this.glassMesh.instanceMatrix.needsUpdate = true;
+      this.carGroup.add(this.glassMesh);
+  }
+
+  update(delta) {
+      const s = this.state;
+      const MAX_SPEED = 15;
+      const ACCEL = 10;
+      const STOP_Y_TOP = 415;
+      const STOP_Y_BOT = 10;
+
+      if (s.mode === 'wait') {
+         s.waitTime -= delta;
+         if (s.waitTime <= 0) {
+             if (s.y < 100) { s.mode = 'up'; s.targetY = STOP_Y_TOP; }
+             else { s.mode = 'down'; s.targetY = STOP_Y_BOT; }
+         }
+      } else {
+         const dist = s.targetY - s.y;
+         const dir = Math.sign(dist);
+         if (Math.abs(s.velocity) < MAX_SPEED) s.velocity += dir * ACCEL * delta;
+         if (Math.abs(dist) < 50) s.velocity *= 0.95;
+         
+         if (Math.abs(dist) < 1 || (dir > 0 && s.velocity < 0) || (dir < 0 && s.velocity > 0)) {
+             s.y = s.targetY;
+             s.velocity = 0;
+             s.mode = 'wait';
+             s.waitTime = 3 + Math.random() * 5;
+         } else {
+             s.y += s.velocity * delta;
+         }
+      }
+
+      // Update the Group position instead of every voxel matrix
+      this.carGroup.position.y = s.y;
+
+      // Update Sound
+      const p = rotatePoint(11, 0, this.angle);
+      this.soundDummy.position.set(p.x, s.y + 3, p.z);
+  }
+
+  getCameraTarget() {
+      const r = 11;
+      const h = this.state.y + 3; 
+      const p = rotatePoint(r, 0, this.angle);
+      const pos = new THREE.Vector3(p.x, h, p.z);
+      const rad = this.angle * (Math.PI / 180);
+      const dir = new THREE.Vector3(Math.cos(rad), 0, Math.sin(rad));
+      const lookAt = pos.clone().add(dir.multiplyScalar(100));
+      lookAt.y -= 20;
+      return { position: pos, lookAt: lookAt };
+  }
+}
+
+class SpaceNeedle {
+    constructor(scene, x, y, z, audioGenerator) {
+        this.group = new THREE.Group();
+        this.group.position.set(x, y, z);
+        this.group.scale.set(0.5, 0.5, 0.5); 
+        const data = generateNeedleVoxels();
+        const createIM = (voxels, matParams) => {
+            const geo = new THREE.BoxGeometry(1, 1, 1);
+            const mat = new THREE.MeshStandardMaterial(matParams);
+            const mesh = new THREE.InstancedMesh(geo, mat, voxels.length);
+            const dummy = new THREE.Object3D();
+            const color = new THREE.Color();
+            voxels.forEach((v, i) => {
+                dummy.position.set(v.x, v.y, v.z);
+                dummy.updateMatrix();
+                mesh.setMatrixAt(i, dummy.matrix);
+                if (v.color) {
+                    color.set(v.color);
+                    mesh.setColorAt(i, color);
+                }
+            });
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            return mesh;
+        };
+
+        this.solidMesh = createIM(data.solid, { roughness: 0.8, metalness: 0.2 });
+        this.group.add(this.solidMesh);
+
+        // Updated Glass Material
+        this.glassMesh = createIM(data.glass, { 
+            color: '#FFFFFF', 
+            transparent: true, 
+            opacity: 0.15, // Very see-through
+            roughness: 0.0, 
+            metalness: 0.9,
+            side: THREE.DoubleSide
+        });
+        this.group.add(this.glassMesh);
+
+        this.rotatingGroup = new THREE.Group();
+        
+        // Solid Rotating Parts (Ribs etc)
+        this.rotatingMesh = createIM(data.rotating, { roughness: 0.8, metalness: 0.1 });
+        this.rotatingGroup.add(this.rotatingMesh);
+        
+        // Rotating Glass Floor (The Loupe)
+        // Use transparent material, slightly higher opacity/roughness than walls
+        this.rotatingGlassMesh = createIM(data.rotatingGlass, { 
+            color: '#AACCFF', 
+            transparent: true, 
+            opacity: 0.25, 
+            roughness: 0.1, 
+            metalness: 0.5,
+            side: THREE.DoubleSide
+        });
+        this.rotatingGroup.add(this.rotatingGlassMesh);
+
+        this.group.add(this.rotatingGroup);
+
+        this.elevators = [
+            new Elevator(60, NEEDLE_PALETTE.ELEVATOR_BLUE, 0, this.group, audioGenerator),
+            new Elevator(180, NEEDLE_PALETTE.ELEVATOR_YELLOW, 2, this.group, audioGenerator),
+            new Elevator(300, NEEDLE_PALETTE.ELEVATOR_RED, 4, this.group, audioGenerator)
+        ];
+
+        // Restrict light distance to 40 so it doesn't bleed into the deck below
+        this.blinkLight = new THREE.PointLight(0xff0000, 500, 40, 2);
+        this.blinkLight.position.set(0, 545, 0);
+        this.group.add(this.blinkLight);
+        this.time = 0;
+
+        if (scene.add) scene.add(this.group);
+        else scene.add(this.group);
+    }
+
+    update(delta) {
+        this.time += delta;
+        // Slow rotation: The Loupe rotates 360 degrees in 45 minutes technically, but let's speed it up for visual effect
+        this.rotatingGroup.rotation.y += delta * 0.05; 
+        
+        this.elevators.forEach(e => e.update(delta));
+        const intensity = Math.sin(this.time * 5) > 0 ? 500 : 0;
+        this.blinkLight.intensity = intensity;
+    }
+
+    getPOV() {
+        const elevator = this.elevators[0];
+        const local = elevator.getCameraTarget();
+        this.group.updateMatrixWorld();
+        const worldPos = local.position.clone().applyMatrix4(this.group.matrixWorld);
+        const worldLook = local.lookAt.clone().applyMatrix4(this.group.matrixWorld);
+        return { position: worldPos, lookAt: worldLook };
+    }
+}
+
+export function createEnvironment(scene, audioGenerator) {
+  const env = new THREE.Group();
+  
+  // 1. Base Layer (Bedrock/Bottom)
+  createPlane(2000, 2000, '#556655', 0, -20, 0, -Math.PI/2, env);
+
+  // 2. Surface Planes (Y=-0.1) avoiding the 5th Ave strip (X: -10 to 30, Z: -230 to 80)
+  // West Plane
+  createPlane(1000, 2000, '#556655', -510, -0.1, 0, -Math.PI/2, env); 
+  // East Plane
+  createPlane(1000, 2000, '#556655', 530, -0.1, 0, -Math.PI/2, env);
+  // North Plane (Above Z=80, between X -10 and 30)
+  createPlane(40, 1000, '#556655', 10, -0.1, 580, -Math.PI/2, env);
+  // South Plane (Below Z=-230, between X -10 and 30) -> This covers the tunnel
+  createPlane(40, 1000, '#556655', 10, -0.1, -730, -Math.PI/2, env);
+
+  // 3. Detailed Voxel Road in the Gap
+  createFifthAvePavement(env);
+
+  // Create Battery Street Tunnel (Underground)
+  createTunnelGeometry(env);
+
+  // Westlake Center (Redesigned)
+  const wl = new THREE.Group();
+  wl.position.set(10, 0, 50);
+
+  const beigeStone = '#D8C8B8';
+  
+  // Left Tower (West)
+  createBox(15, 60, 40, beigeStone, -22, 30, 20, wl);
+  
+  // Right Tower (East)
+  createBox(15, 60, 40, beigeStone, 22, 30, 20, wl);
+  
+  // Overhead Bridge (The Mall levels) - Spanning across the gap
+  // Starts at Y=18 to clear monorail (height 12) + clearance
+  createBox(30, 20, 40, beigeStone, 0, 50, 20, wl);
+  
+  // Back Wall (Recessed) - To create the "Tunnel" look
+  // It starts further back (Z=20 relative to group center at 50, so Z=70 world)
+  createBox(30, 60, 2, '#222', 0, 30, 38, wl);
+
+  // Station Platform Floor (Under tracks but above street)
+  // Tracks are at Y=12. Platform at Y=11.
+  createBox(10, 1, 40, COLORS.CONCRETE, -8, 11, 20, wl); // Left
+  createBox(10, 1, 40, COLORS.CONCRETE, 8, 11, 20, wl); // Right
+  
+  // Columns holding up the overhead bridge
+  createBox(2, 40, 2, beigeStone, -14, 20, 5, wl);
+  createBox(2, 40, 2, beigeStone, 14, 20, 5, wl);
+
+  // Signage "WESTLAKE CENTER" - Simple blocks
+  createBox(28, 4, 1, '#004488', 0, 45, 1, wl); // Sign board
+  createBox(26, 0.5, 1.2, '#FFFFFF', 0, 45, 1, wl); // Text strip line
+
+  // Glass Windows on the towers
+  const glassMat = new THREE.MeshStandardMaterial({ 
+      color: '#88CCFF', transparent: true, opacity: 0.6, roughness: 0.1 
+  });
+  const gLeft = new THREE.Mesh(new THREE.BoxGeometry(10, 40, 1), glassMat);
+  gLeft.position.set(-22, 35, 0.5);
+  wl.add(gLeft);
+  const gRight = new THREE.Mesh(new THREE.BoxGeometry(10, 40, 1), glassMat);
+  gRight.position.set(22, 35, 0.5);
+  wl.add(gRight);
+
+  // Details
+  createTicketMachine(12, 11, 10, -Math.PI/2, wl);
+  createTicketMachine(-12, 11, 10, Math.PI/2, wl);
+  createBench(6, 11, 20, -Math.PI/2, wl);
+  createBench(-6, 11, 20, Math.PI/2, wl);
+
+  const bufferG = new THREE.Group();
+  // Z=30 relative to wl(50) = 80 Absolute. Matches new track end.
+  bufferG.position.set(0, TRACK_HEIGHT, 30); 
+  
+  // Red Bumpers (Relative X: -2.5 is Left Track, 2.5 is Right Track)
+  const bMat = new THREE.MeshStandardMaterial({color: '#E31837', emissive: '#550000'});
+  const bGeo = new THREE.BoxGeometry(1.5, 1, 1);
+  const bufL = new THREE.Mesh(bGeo, bMat); bufL.position.set(-2.5, 0.5, 0); bufferG.add(bufL);
+  const bufR = new THREE.Mesh(bGeo, bMat); bufR.position.set(2.5, 0.5, 0); bufferG.add(bufR);
+  
+  wl.add(bufferG);
+
+  const gRoof = createBox(30, 0.5, 25, COLORS.GLASS, 0, 25, -10, wl);
+  gRoof.material.transparent = true; gRoof.material.opacity = 0.5; gRoof.rotation.x = 0.2;
+  for(let i=0; i<6; i++) {
+      const bm = createBox(30.5, 0.8, 0.5, COLORS.STEEL, 0, 25, -20 + (i*4), wl);
+      bm.rotation.x = 0.2;
+  }
+  for(let i=0; i<5; i++) {
+      const bm = createBox(0.5, 0.8, 25, COLORS.STEEL, -12 + (i*6), 25, -10, wl);
+      bm.rotation.x = 0.2;
+  }
+  env.add(wl);
+
+  // Seattle Center (End)
+  const seattleCenter = new THREE.Group();
+  seattleCenter.position.set(-155, 0, -280);
+  createBox(50, 2, 16, '#EEEEEE', 0, TRACK_HEIGHT - 1, 0, seattleCenter); 
+  createBox(50, 1.2, 0.2, COLORS.STEEL, 0, TRACK_HEIGHT + 1, 7.8, seattleCenter).material.opacity = 0.5;
+  createBox(50, 0.2, 0.4, '#C0C0C0', 0, TRACK_HEIGHT + 1.6, 7.8, seattleCenter);
+  createBox(50, 1.2, 0.2, COLORS.STEEL, 0, TRACK_HEIGHT + 1, -7.8, seattleCenter).material.opacity = 0.5;
+  createBox(50, 0.2, 0.4, '#C0C0C0', 0, TRACK_HEIGHT + 1.6, -7.8, seattleCenter);
+  [-15, 0, 15].forEach(x => {
+      createBox(1.5, 6, 1.5, COLORS.CONCRETE_DARK, x, TRACK_HEIGHT + 3, 0, seattleCenter);
+      const w1 = createBox(1.4, 1, 8, COLORS.CONCRETE, x, TRACK_HEIGHT + 6, 3, seattleCenter); w1.rotation.x = 0.4;
+      const w2 = createBox(1.4, 1, 8, COLORS.CONCRETE, x, TRACK_HEIGHT + 6, -3, seattleCenter); w2.rotation.x = -0.4;
+  });
+  createBox(60, 0.5, 18, '#FFFFFF', 0, TRACK_HEIGHT + 7.5, 0, seattleCenter); 
+  createBench(-10, TRACK_HEIGHT - 0.5, 4, 0, seattleCenter);
+  createBench(10, TRACK_HEIGHT - 0.5, 4, 0, seattleCenter);
+  createBench(-10, TRACK_HEIGHT - 0.5, -4, 0, seattleCenter);
+  createBench(10, TRACK_HEIGHT - 0.5, -4, 0, seattleCenter);
+  createTicketMachine(20, TRACK_HEIGHT - 0.5, 0, 0, seattleCenter);
+  createTurnstile(22, TRACK_HEIGHT - 0.5, 2, seattleCenter);
+  createTurnstile(22, TRACK_HEIGHT - 0.5, -2, seattleCenter);
+
+  createBox(2, 2, 2, '#333', 4, TRACK_HEIGHT+1, 2.5, seattleCenter);
+  createBox(0.2, 1, 1.5, '#FF0000', 5.1, TRACK_HEIGHT+1, 2.5, seattleCenter).material.emissive = new THREE.Color('#550000');
+  createBox(2, 2, 2, '#333', 4, TRACK_HEIGHT+1, -2.5, seattleCenter);
+  createBox(0.2, 1, 1.5, '#FF0000', 5.1, TRACK_HEIGHT+1, -2.5, seattleCenter).material.emissive = new THREE.Color('#550000');
+
+  const spiral = new THREE.Group();
+  spiral.position.set(28, 0, 8);
+  createCylinder(1.5, 1.5, 14, 16, COLORS.CONCRETE, 0, 6, 0, spiral);
+  const booth = new THREE.Group(); booth.position.set(4, 0, 4);
+  createCylinder(2.5, 2.5, 3, 6, '#334455', 0, 1.5, 0, booth);
+  createCylinder(2.6, 2.6, 1, 6, '#222', 0, 1.5, 0, booth);
+  createCylinder(0, 3, 1.5, 6, '#222', 0, 3.5, 0, booth);
+  spiral.add(booth);
+  for(let i=0; i<24; i++) {
+      const s = new THREE.Group();
+      s.position.y = i*0.5 + 0.5; s.rotation.y = i*0.3;
+      createBox(3, 0.2, 1.2, '#DDD', 3, 0, 0, s).rotation.z = 0.1;
+      createBox(0.1, 1.2, 0.1, '#333', 4.4, 0.6, 0, s);
+      createBox(0.1, 0.1, 1.5, 'red', 4.4, 1.2, 0.5, s).rotation.x = 0.1;
+      spiral.add(s);
+  }
+  seattleCenter.add(spiral);
+  
+  createArmory(15, 0, -30, seattleCenter); 
+  createMuralAmphitheater(-70, 0, -35, seattleCenter);
+  createChihulyGarden(-40, 0, 25, seattleCenter);
+
+  env.add(seattleCenter);
+
+  const needle = new SpaceNeedle(seattleCenter, -40, 0, 85, audioGenerator);
+  animatedObjects.push(needle);
+
+  // MoPOP
+  const mopop = new THREE.Group();
+  mopop.position.set(-70, 0, -280);
+  mopop.rotation.y = Math.PI / 4;
+  mopop.updateMatrix(); 
+
+  // --- SPOTLIGHTS ---
+  const spotCount = 8;
+  const spotRadius = 50; 
+  for (let i = 0; i < spotCount; i++) {
+      const angle = (i / spotCount) * Math.PI * 2;
+      const x = Math.sin(angle) * spotRadius;
+      const z = Math.cos(angle) * spotRadius;
+      
+      const spotLight = new THREE.SpotLight(0xFFFFFF, 2000);
+      spotLight.position.set(x, 0.5, z);
+      spotLight.angle = Math.PI / 6;
+      spotLight.penumbra = 0.5;
+      spotLight.decay = 1.5;
+      spotLight.distance = 200;
+      spotLight.target.position.set(0, 20, 0); 
+      mopop.add(spotLight);
+      mopop.add(spotLight.target);
+
+      createCylinder(0.5, 0.6, 0.5, 8, '#222', x, 0.25, z, mopop);
+      createPlane(0.4, 0.4, '#FFFFE0', x, 0.51, z, -Math.PI/2, mopop).material.emissive = new THREE.Color(0xFFFFFF);
+  }
+
+  // --- TRACK EXCLUSION LOGIC ---
+  const relevantTrackPoints = [];
+  const mopopWorldPos = new THREE.Vector3(-70, 0, -280);
+  [TRACK_LEFT, TRACK_RIGHT].forEach(track => {
+     if (!track) return;
+     const pts = track.getSpacedPoints(400); 
+     if (pts) {
+         pts.forEach(p => {
+             if (p && Math.abs(p.z - mopopWorldPos.z) < 60 && Math.abs(p.x - mopopWorldPos.x) < 60) {
+                 relevantTrackPoints.push(p);
+             }
+         });
+     }
+  });
+
+  const checkExclusion = (localX, localY, localZ) => {
+      if (localY < TRACK_HEIGHT - 2 || localY > TRACK_HEIGHT + 6) return false;
+      const v = new THREE.Vector3(localX, localY, localZ);
+      v.applyMatrix4(mopop.matrix);
+
+      if (!relevantTrackPoints || relevantTrackPoints.length === 0) return false;
+
+      for(let p of relevantTrackPoints) {
+          if (!p || !p.x) continue;
+          const dx = p.x - v.x;
+          const dz = p.z - v.z;
+          if (dx*dx + dz*dz < 16) { 
+              return true;
+          }
+      }
+      return false;
+  };
+
+  if (audioGenerator) {
+      const sound = audioGenerator.createPositionalAudio('MOPOP', 80, 800, 0.6);
+      if (sound) mopop.add(sound);
+  }
+
+  createSteppedLobe(
+    scene,
+    new THREE.Vector3(-25, 0, 0),
+    { w: 18, h: 22, d: 15 }, 
+    '#C5A059', 
+    { metalness: 1.0, roughness: 0.15 }, 
+    (nx, ny, nz) => {
+        const angle = Math.atan2(nz, nx);
+        const radius = Math.sqrt(nx*nx + nz*nz);
+        const wave = 0.8 + Math.sin(ny * 5 + angle * 2) * 0.15;
+        return radius < wave;
+    },
+    mopop,
+    checkExclusion
+  );
+
+  createSteppedLobe(
+    scene,
+    new THREE.Vector3(-5, 0, 25),
+    { w: 12, h: 18, d: 12 },
+    '#D91E36', 
+    { metalness: 0.9, roughness: 0.1 }, 
+    (nx, ny, nz) => {
+         const dist = nx*nx + ny*ny + nz*nz;
+         const bulge = (ny < 0) ? 1.0 + Math.abs(ny)*0.2 : 1.0; 
+         return dist < (0.8 * bulge);
+    },
+    mopop,
+    checkExclusion
+  );
+
+  createSteppedLobe(
+    scene,
+    new THREE.Vector3(16, 0, 6),
+    { w: 15, h: 28, d: 15 },
+    '#7A8999', 
+    { metalness: 1.0, roughness: 0.1 }, 
+    (nx, ny, nz) => {
+        const shiftX = ny * 0.5;
+        const widthAtY = 1.0 - (ny + 1) * 0.2; 
+        const effectiveX = nx - shiftX;
+        return (effectiveX*effectiveX + nz*nz) < (widthAtY * widthAtY);
+    },
+    mopop,
+    checkExclusion
+  );
+  
+  createSteppedLobe(
+    scene,
+    new THREE.Vector3(2, 0, -4),
+    { w: 8, h: 32, d: 8 },
+    '#111111', 
+    { metalness: 1.0, roughness: 0.05, envMapIntensity: 2.5 }, 
+    (nx, ny, nz) => {
+         return Math.abs(nx) < 0.6 && Math.abs(nz) < 0.6;
+    },
+    mopop,
+    checkExclusion
+  );
+
+  env.add(mopop);
+
+  // City Background
+  const city = new THREE.Group();
+
+  const createVoxelTree = (x, z, p) => {
+      const g = new THREE.Group(); g.position.set(x, 0, z);
+      createBox(0.6, 4, 0.6, '#5C4033', 0, 2, 0, g);
+      const leavesColor = '#32CD32'; 
+      createBox(2.4, 1.2, 2.4, leavesColor, 0, 4, 0, g);
+      createBox(1.8, 1.2, 1.8, leavesColor, 0, 5, 0, g);
+      createBox(1.2, 0.8, 1.2, leavesColor, 0, 6, 0, g);
+      if(p) p.add(g);
+  };
+  
+  const createLamp = (x, z, r, p, yBase = 0) => {
+      const g = new THREE.Group(); g.position.set(x, yBase, z); g.rotation.y = r;
+      createBox(0.8, 1, 0.8, '#444', 0, 0.5, 0, g);
+      createBox(0.3, 8, 0.3, '#444', 0, 4, 0, g);
+      createBox(2.5, 0.2, 0.3, '#444', 1, 7.5, 0, g);
+      
+      // Glass casing for light
+      const glass = createBox(0.9, 0.5, 0.9, '#FFFFE0', 2, 7.2, 0, g);
+      glass.material.transparent = true;
+      glass.material.opacity = 0.8;
+      glass.material.emissive = new THREE.Color('#FFFFE0');
+      glass.material.emissiveIntensity = 0.8;
+
+      const bulb = new THREE.PointLight(0xFFAA00, 10, 30); // Orange/Gold
+      bulb.position.set(2, 6.5, 0); 
+      bulb.userData = { nightLight: true }; 
+      g.add(bulb);
+
+      if(p) p.add(g);
+  };
+
+  const exclusionZonesLeft = [
+      [17.5, 42.5],   
+      [-20, 0],       
+      [-101, -79],    
+      [-160, -120],   
+      [-240, -210]    
+  ];
+  const exclusionZonesRight = [
+      [-12.5, 12.5],  
+      [30, 50],       
+      [-55, -25],     
+      [-92.5, -67.5], 
+      [-135, -105],   
+      [-172.5, -147.5], 
+      [-240, -210]    
+  ];
+
+  const isExcluded = (z, zones) => {
+      for(let zone of zones) {
+          if (z >= zone[0] - 2 && z <= zone[1] + 2) return true;
+      }
+      return false;
+  };
+
+  for(let i=-3; i<12; i++) {
+      const z = 40 - (i*25);
+      
+      // Calculate ground elevation at this Z to place lamps correctly
+      let y = 0;
+      // North Ramp (Battery St) logic
+      if (z < -140 && z > -230) {
+          const rampLen = -90; // -230 - (-140)
+          const dist = z - (-140);
+          const t = dist / rampLen;
+          y = -12 * t;
+      } 
+      // South Ramp (Westlake) logic
+      else if (z > 40 && z < 100) {
+          const rampLen = 40; // 80 - 40
+          const dist = z - 40;
+          const t = Math.min(1, dist / rampLen);
+          y = -12 * t;
+      }
+      // Ensure we don't go lower than tunnel floor (approx -12)
+      y = Math.max(-12, y);
+
+      createLamp(-8, z, Math.PI/2, city, y);
+      if (!isExcluded(z + 12, exclusionZonesLeft)) {
+          createVoxelTree(-12, z + 12, city);
+      }
+      createLamp(28, z, -Math.PI/2, city, y);
+      if (!isExcluded(z + 12, exclusionZonesRight)) {
+          createVoxelTree(32, z + 12, city);
+      }
+  }
+
+  createDetailedBrickBuilding(-25, 30, 8, 25, 25, '#8B4513', city); 
+  createDetailedBrickBuilding(-25, -90, 6, 22, 22, '#553333', city); 
+  createDetailedBrickBuilding(45, 40, 5, 25, 20, '#A0522D', city); 
+  createDetailedBrickBuilding(45, -80, 10, 25, 25, '#708090', city); 
+  createBrutalistBlock(45, -160, 40, 25, city); 
+  createDetailedGlassTower(-25, -10, 10, 20, '#88CCFF', city); 
+  createDetailedGlassTower(45, 0, 12, 25, '#AAFFAA', city); 
+  createDetailedGlassTower(45, -120, 8, 30, '#AACCDD', city); 
+  createStackedApartments(-30, -140, city);
+
+  const th = new THREE.Group(); th.position.set(45, 0, -40);
+  const thColor = '#A05040'; 
+  createBox(25, 25, 30, thColor, 0, 12.5, 0, th);
+  createBox(25, 40, 15, thColor, 0, 20, 7.5, th);
+  for(let i=0; i<5; i++) {
+     createBox(1, 25, 1, '#D08070', -10 + (i*5), 12.5, -15.1, th); 
+  }
+  const marq = createBox(6, 6, 14, '#FF1493', -13, 8, -5, th); marq.rotation.z = 0.1;
+  marq.material.emissive = new THREE.Color('#880044');
+  createPlane(0.1, 4, 'white', -14, 8, -5, 0, th).rotation.y = Math.PI/2;
+  createBox(18, 1, 8, '#333', 0, 4, -16, th);
+  createBox(0.5, 4, 0.5, '#D4AF37', 8, 2, -19, th);
+  createBox(0.5, 4, 0.5, '#D4AF37', -8, 2, -19, th);
+  city.add(th);
+  
+  createTunnelEntrance(10, -225, city);
+
+  env.add(city);
+  
+  const traffic = new TrafficSystem(city, audioGenerator);
+  animatedObjects.push(traffic);
+
+  const heroTaxi = new HeroTaxi(scene, audioGenerator);
+  animatedObjects.push(heroTaxi);
+
+  scene.add(env);
+}
