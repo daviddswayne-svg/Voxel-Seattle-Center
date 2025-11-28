@@ -922,6 +922,208 @@ const createChihulyGarden = (x, y, z, parent) => {
     parent.add(g);
 };
 
+const createPacificScienceCenter = (x, z, parent) => {
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+    
+    // 1. FLIP ORIENTATION to match real world alignment
+    group.rotation.y = Math.PI; 
+
+    // 2. PALETTE & MATERIALS
+    const C_WHITE = '#E0E0E0'; // Realistic Seattle Concrete
+    const C_SHADOW = '#444444'; // Recessed areas
+    const C_POOL_WATER = '#20B2AA'; // Turquoise
+    
+    // --- REFLECTION POOLS ---
+    const poolW = 90;
+    const poolD = 120;
+    const waterGeo = new THREE.BoxGeometry(poolW, 0.4, poolD);
+    const waterMat = new THREE.MeshPhysicalMaterial({
+        color: C_POOL_WATER,
+        transmission: 0.6,
+        opacity: 0.8,
+        roughness: 0.1,
+        metalness: 0.1,
+        transparent: true,
+        reflectivity: 1.0,
+    });
+    const water = new THREE.Mesh(waterGeo, waterMat);
+    water.position.set(0, 0.2, 0);
+    group.add(water);
+    
+    // Pool Basin
+    createBox(poolW + 4, 1, poolD + 4, '#FFFFFF', 0, -0.5, 0, group);
+    
+    // Walkways
+    createBox(12, 0.6, poolD + 6, '#FFFFFF', 0, 0.5, 0, group); // Center Path
+    createBox(poolW + 6, 0.6, 12, '#FFFFFF', 0, 0.5, 0, group); // Cross Path
+    
+    // --- YAMASAKI ARCHES (HIGH FIDELITY) ---
+    // Instanced mesh for extreme detail without drag
+    const archVoxels = [];
+    const vSize = 0.25; // High Res
+    const archH = 50;
+    const archBaseW = 18;
+    
+    for(let y = 0; y <= archH; y += vSize) {
+        const t = y / archH;
+        // Gothic Taper: w = Base * (1 - t)^0.5 (Parabolic/Gothic approximation)
+        const currentW = archBaseW * Math.pow(1 - t, 0.5);
+        const thick = 2.5 * (1 - t * 0.3); // Tapers slightly
+        
+        const halfW = currentW / 2;
+        const legThickness = Math.max(0.6, currentW * 0.15);
+        
+        // Lattice Logic: Top 20%
+        const isLattice = t > 0.8;
+        
+        const addVoxel = (vx, vy, vz) => {
+            if (isLattice) {
+                // Delicate Filigree Pattern
+                const lx = Math.floor(vx/vSize);
+                const ly = Math.floor(vy/vSize);
+                if ((lx + ly) % 2 !== 0) return;
+            }
+            archVoxels.push({x: vx, y: vy, z: vz});
+        };
+
+        // Legs
+        for(let x = -halfW; x <= halfW; x += vSize) {
+            // Hollow out the center, keep legs
+            const isLeg = (Math.abs(x) > halfW - legThickness) || (t > 0.95); // Solid cap
+            if (isLeg) {
+                for(let z = -thick/2; z <= thick/2; z += vSize) {
+                    addVoxel(x, y, z);
+                }
+            }
+        }
+        
+        // Central decorative spine ridge
+        if (t < 0.95) {
+             for(let z = -thick/2 - 0.25; z <= -thick/2; z += vSize) {
+                 addVoxel(-halfW, y, z);
+                 addVoxel(halfW, y, z);
+             }
+        }
+    }
+    
+    const archGeo = new THREE.BoxGeometry(vSize, vSize, vSize);
+    const archMat = new THREE.MeshStandardMaterial({color: '#FFFFFF', roughness: 0.4});
+    const archMesh = new THREE.InstancedMesh(archGeo, archMat, archVoxels.length * 5);
+    const dummy = new THREE.Object3D();
+    let idx = 0;
+    
+    for(let i=0; i<5; i++) {
+        const zOff = (i - 2) * 18;
+        archVoxels.forEach(v => {
+            if (v && typeof v.x === 'number') { // Safety check
+                dummy.position.set(v.x, v.y + 0.5, v.z + zOff);
+                dummy.updateMatrix();
+                archMesh.setMatrixAt(idx++, dummy.matrix);
+            }
+        });
+    }
+    archMesh.castShadow = true;
+    archMesh.receiveShadow = true;
+    group.add(archMesh);
+    
+    // --- PRE-CAST CONCRETE WALLS (VOXEL PANELS) ---
+    // Helper to create a single patterned panel
+    const createPatternedWall = (wx, wz, length, height, depth, axis) => {
+        const wGroup = new THREE.Group();
+        wGroup.position.set(wx, height/2, wz);
+        if (axis === 'z') wGroup.rotation.y = Math.PI/2;
+        
+        // Base Wall
+        createBox(length, height, depth - 1, C_SHADOW, 0, 0, -0.5, wGroup);
+        
+        // Panels
+        const panelW = 6;
+        const panelCount = Math.floor(length / panelW);
+        const panelGeo = new THREE.BoxGeometry(panelW - 0.5, height - 1, 1);
+        
+        // Diamond Pattern Texture Logic
+        // In a real engine we'd use a texture, here we use geometry for "Voxel Art" style
+        // We create ONE detailed diamond panel and instance it
+        const diamondVoxels = [];
+        const dSize = 0.5;
+        const pW = panelW - 0.5;
+        const pH = height - 1;
+        
+        for(let py = -pH/2; py < pH/2; py += dSize) {
+            for(let px = -pW/2; px < pW/2; px += dSize) {
+                // Diamond shape inequality: |x|/W + |y|/H < 1
+                const nx = (px / (pW/2));
+                const ny = (py / (pH/2));
+                if (Math.abs(nx) + Math.abs(ny) < 1.0) {
+                    diamondVoxels.push({x: px, y: py, z: 0});
+                }
+            }
+        }
+        
+        const dGeo = new THREE.BoxGeometry(dSize, dSize, 2);
+        const dMat = new THREE.MeshStandardMaterial({color: C_WHITE});
+        const dMesh = new THREE.InstancedMesh(dGeo, dMat, diamondVoxels.length * panelCount);
+        
+        let dIdx = 0;
+        for(let i=0; i<panelCount; i++) {
+            const xOff = (i - panelCount/2 + 0.5) * panelW;
+            
+            // Frame
+            const frame = createBox(panelW - 0.2, height, 1.5, C_WHITE, xOff, 0, 0, wGroup);
+            
+            // Fill with diamond voxels
+            diamondVoxels.forEach(v => {
+                if (v && typeof v.x === 'number') { // Safety check
+                    dummy.position.set(v.x + xOff, v.y, 0.5); 
+                    dummy.updateMatrix();
+                    dMesh.setMatrixAt(dIdx++, dummy.matrix);
+                }
+            });
+        }
+        wGroup.add(dMesh);
+        group.add(wGroup);
+    };
+    
+    // West Building
+    createPatternedWall(-55, 0, 110, 18, 12, 'z');
+    // East Building
+    createPatternedWall(55, 0, 110, 18, 12, 'z');
+    // North Block
+    createPatternedWall(0, -65, 80, 20, 20, 'x');
+
+    // --- DOMES ---
+    // Laser Dome (South/Top in flipped view)
+    const laserGroup = new THREE.Group();
+    laserGroup.position.set(0, 0, 80);
+    const laserGeo = new THREE.IcosahedronGeometry(14, 1);
+    const laserMat = new THREE.MeshStandardMaterial({color: '#FFFFFF', flatShading: true});
+    const lDome = new THREE.Mesh(laserGeo, laserMat);
+    lDome.position.y = 6;
+    laserGroup.add(lDome);
+    // Base Ring
+    createCylinder(13, 14, 4, 16, C_WHITE, 0, 2, 0, laserGroup);
+    group.add(laserGroup);
+    
+    // IMAX (North/Bottom in flipped view)
+    // Boeing IMAX (Curved)
+    const boeing = new THREE.Group();
+    boeing.position.set(-30, 0, -90);
+    createCylinder(18, 18, 20, 32, C_WHITE, 0, 10, 0, boeing); // Rounded drum
+    createBox(40, 4, 40, '#333333', 0, 22, 0, boeing); // Roof cap
+    group.add(boeing);
+    
+    // PACCAR IMAX (Angular)
+    const paccar = new THREE.Group();
+    paccar.position.set(30, 0, -90);
+    createBox(30, 20, 30, C_WHITE, 0, 10, 0, paccar);
+    const wedge = createBox(32, 2, 35, '#DDDDDD', 0, 21, 0, paccar);
+    wedge.rotation.x = 0.2; // Tilted roof
+    group.add(paccar);
+
+    if (parent) parent.add(group);
+};
+
 const createTunnelEntrance = (x, z, parent) => {
     const group = new THREE.Group();
     group.position.set(x, 0, z);
@@ -1953,6 +2155,7 @@ export function createEnvironment(scene, audioGenerator) {
   createArmory(15, 0, -30, seattleCenter); 
   createMuralAmphitheater(-70, 0, -35, seattleCenter);
   createChihulyGarden(-40, 0, 25, seattleCenter);
+  createPacificScienceCenter(-60, 260, seattleCenter);
 
   env.add(seattleCenter);
 
