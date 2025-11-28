@@ -95,32 +95,36 @@ export function createTrack(curve, scene) {
 class NewsHelicopter {
     constructor(scene, landingPadPos, audioGenerator) {
         this.group = new THREE.Group();
-        this.landingPos = landingPadPos.clone();
+        // Safety check for landing position
+        this.landingPos = landingPadPos ? landingPadPos.clone() : new THREE.Vector3(0,0,0);
         this.group.position.copy(this.landingPos);
         
+        // Target: Space Needle
+        this.needlePos = new THREE.Vector3(-195, 230, -195); 
+        this.orbitRadius = 70;
+
         // State Machine
-        this.state = 'PARKED'; // PARKED, SPOOLING, TAKEOFF, PATROL, LANDING, COOLDOWN
+        this.state = 'PARKED'; 
         this.timer = 0;
         this.rotorSpeed = 0;
         this.targetRotorSpeed = 0;
-        this.altitude = this.landingPos.y;
-        this.patrolAngle = 0;
-        this.patrolRadius = 80;
-        this.patrolCenter = new THREE.Vector3(0, 0, -100);
         
+        // Flight vars
+        this.orbitAngle = 0;
+        this.flightCurve = null;
+        this.flightProgress = 0;
+        this.flightDuration = 0;
+
         // Audio
         if (audioGenerator) {
-            // High pitch turbine whine
-            this.sound = audioGenerator.createPositionalAudio('ELEVATOR', 50, 500, 0.0); 
-            // Reuse elevator buffer for turbine sound, pitch shifted if possible or just volume modulated
+            this.sound = audioGenerator.createPositionalAudio('ELEVATOR', 50, 1000, 0.0); 
             if (this.sound) {
-                this.sound.setPlaybackRate(1.5); // Higher pitch for turbine
+                this.sound.setPlaybackRate(1.5); 
                 this.group.add(this.sound);
             }
         }
 
         // --- MESH GENERATION ---
-        
         // Fuselage (White)
         const fuseColor = '#FFFFFF';
         const stripeColor = '#CC0000';
@@ -144,7 +148,7 @@ class NewsHelicopter {
         createBox(2.3, 0.3, 3.6, stripeColor, 0, 1.5, 0.5, body);
         createBox(0.9, 0.3, 5.0, stripeColor, 0, 1.8, -3.5, body);
 
-        // Cockpit Glass (Smokey)
+        // Cockpit Glass
         const glassMat = new THREE.MeshStandardMaterial({ 
             color: glassColor, transparent: true, opacity: 0.6, roughness: 0.1 
         });
@@ -153,7 +157,7 @@ class NewsHelicopter {
         windshield.rotation.x = -0.3;
         body.add(windshield);
         
-        // Pilot Silhouette
+        // Pilot
         createBox(0.6, 0.6, 0.6, '#000000', 0, 1.8, 1.5, body);
 
         // Skids
@@ -206,18 +210,23 @@ class NewsHelicopter {
         this.navRed.position.set(-1.2, 2.0, 0);
         body.add(this.navRed);
 
-        this.spotlight = new THREE.SpotLight(0xFFFFFF, 0);
-        this.spotlight.position.set(0, 0.5, 3.5);
-        this.spotlight.angle = Math.PI / 8;
-        this.spotlight.penumbra = 0.3;
-        this.spotlight.distance = 200;
-        this.spotlight.castShadow = true;
-        this.spotlightTarget = new THREE.Object3D();
-        scene.add(this.spotlightTarget);
-        this.spotlight.target = this.spotlightTarget;
-        body.add(this.spotlight);
-
         scene.add(this.group);
+    }
+
+    // Helper to generate a flight curve
+    generateCurve(start, end, heightBoost, lateralOffset) {
+        if (!start || !end) return new THREE.QuadraticBezierCurve3(new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3());
+        
+        const mid = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+        mid.y += heightBoost; 
+        
+        // Add lateral offset to make it a curve
+        const dir = new THREE.Vector3().subVectors(end, start).normalize();
+        const up = new THREE.Vector3(0, 1, 0);
+        const side = new THREE.Vector3().crossVectors(dir, up).normalize();
+        mid.add(side.multiplyScalar(lateralOffset));
+        
+        return new THREE.QuadraticBezierCurve3(start.clone(), mid, end.clone());
     }
 
     update(delta) {
@@ -233,12 +242,11 @@ class NewsHelicopter {
         this.mainRotor.rotation.y -= this.rotorSpeed * delta * 20;
         this.tailRotor.rotation.x -= this.rotorSpeed * delta * 30;
 
-        // Blinking Lights (1s interval)
-        const blink = Math.floor(this.timer * 2) % 2 === 0;
+        // Lights
+        const blink = Math.floor(this.timer * 4) % 2 === 0;
         this.navGreen.intensity = blink && this.rotorSpeed > 1 ? 2 : 0;
         this.navRed.intensity = blink && this.rotorSpeed > 1 ? 2 : 0;
 
-        // Audio Volume
         if (this.sound) {
             this.sound.setVolume(Math.min(1.0, this.rotorSpeed / 5));
         }
@@ -247,7 +255,7 @@ class NewsHelicopter {
         switch (this.state) {
             case 'PARKED':
                 this.targetRotorSpeed = 0;
-                if (this.timer > 2) {
+                if (this.timer > 3) {
                     this.state = 'SPOOLING';
                     this.timer = 0;
                 }
@@ -255,7 +263,6 @@ class NewsHelicopter {
 
             case 'SPOOLING':
                 this.targetRotorSpeed = 15;
-                // Gimbal Check
                 this.gimbal.rotation.y = Math.sin(this.timer * 3) * 0.5;
                 if (this.timer > 5) {
                     this.state = 'TAKEOFF';
@@ -264,92 +271,137 @@ class NewsHelicopter {
                 break;
 
             case 'TAKEOFF':
-                // Rise to patrol height (70)
-                const takeoffDuration = 5;
-                const takeoffProgress = Math.min(1, this.timer / takeoffDuration);
+                // Vertical rise to safe altitude
+                const takeoffH = this.landingPos.y + 25;
+                this.group.position.y += delta * 8;
+                this.body.rotation.x = -0.05; // Slightly nose up (hover stability)
                 
-                // Ease out
-                const y = this.landingPos.y + (70 - this.landingPos.y) * Math.sin(takeoffProgress * Math.PI / 2);
-                this.group.position.y = y;
-                
-                // Tilt forward slightly
-                this.body.rotation.x = THREE.MathUtils.lerp(0, 0.2, takeoffProgress);
-
-                if (takeoffProgress >= 1) {
-                    this.state = 'PATROL';
+                if (this.group.position.y >= takeoffH) {
+                    this.state = 'ASCENT';
                     this.timer = 0;
-                    this.spotlight.intensity = 10; // Turn on searchlight
+                    
+                    // Orbit Start Point (East of Needle)
+                    const orbitStart = new THREE.Vector3(
+                        this.needlePos.x + this.orbitRadius, 
+                        this.needlePos.y, 
+                        this.needlePos.z
+                    );
+                    
+                    // Curve out to the West (Left) to avoid buildings then hook back
+                    this.flightCurve = this.generateCurve(this.group.position, orbitStart, 0, -60);
+                    this.flightProgress = 0;
+                    this.flightDuration = 18; // Seconds
                 }
                 break;
 
-            case 'PATROL':
-                const patrolDuration = 30;
-                const t = (this.timer / patrolDuration) * Math.PI * 2; // 0 to 2PI
-                
-                // Circular path
-                const r = this.patrolRadius;
-                const cx = this.patrolCenter.x;
-                const cz = this.patrolCenter.z;
-                
-                // Calculate position on circle
-                const tx = cx + Math.cos(t) * r;
-                const tz = cz + Math.sin(t) * r;
-                
-                this.group.position.x = tx;
-                this.group.position.z = tz;
-                
-                // Face forward along tangent
-                const tangentX = -Math.sin(t);
-                const tangentZ = Math.cos(t);
-                this.group.rotation.y = Math.atan2(tangentX, tangentZ);
-                
-                // Bank into turn (lean left for CCW)
-                this.body.rotation.z = 0.3; 
-                this.body.rotation.x = 0.1; // Slight forward pitch
-
-                // Spotlight Logic
-                this.spotlightTarget.position.set(tx + tangentX*20, 0, tz + tangentZ*20);
-                this.gimbal.lookAt(this.spotlightTarget.position);
-
-                if (this.timer > patrolDuration) {
-                    this.state = 'LANDING';
+            case 'ASCENT':
+                this.flightProgress += delta / this.flightDuration;
+                if (this.flightProgress >= 1) {
+                    this.flightProgress = 1;
+                    this.state = 'ORBIT';
+                    this.orbitAngle = 0; // Curve ends exactly at Orbit angle 0
                     this.timer = 0;
-                    this.spotlight.intensity = 0;
+                } else if (this.flightCurve) {
+                    const t = this.flightProgress;
+                    const pos = this.flightCurve.getPoint(t);
+                    if (pos) {
+                        this.group.position.copy(pos);
+                        
+                        // Look ahead
+                        const tangent = this.flightCurve.getTangent(t).normalize();
+                        const lookTarget = pos.clone().add(tangent);
+                        this.group.lookAt(lookTarget);
+                    }
+                    
+                    // Aerodynamics
+                    this.body.rotation.x = THREE.MathUtils.lerp(this.body.rotation.x, 0.25, delta * 2);
+                    this.body.rotation.z = THREE.MathUtils.lerp(this.body.rotation.z, 0.3, delta * 2);
+                }
+                break;
+
+            case 'ORBIT':
+                const orbitDuration = 25; 
+                // CCW Turn
+                this.orbitAngle -= (delta / orbitDuration) * Math.PI * 2;
+                
+                const ox = this.needlePos.x + Math.cos(this.orbitAngle) * this.orbitRadius;
+                const oz = this.needlePos.z + Math.sin(this.orbitAngle) * this.orbitRadius;
+                
+                this.group.position.set(ox, this.needlePos.y, oz);
+                
+                // Face tangent
+                const nextAngle = this.orbitAngle - 0.1;
+                const lookX = this.needlePos.x + Math.cos(nextAngle) * this.orbitRadius;
+                const lookZ = this.needlePos.z + Math.sin(nextAngle) * this.orbitRadius;
+                this.group.lookAt(lookX, this.needlePos.y, lookZ);
+                
+                // Stable bank and pitch
+                this.body.rotation.z = 0.3; 
+                this.body.rotation.x = 0.1; 
+                this.gimbal.lookAt(this.needlePos);
+
+                if (this.timer > orbitDuration * 1.5) { 
+                    this.state = 'APPROACH';
+                    this.timer = 0;
+                    
+                    // Calculate current position on circle to start curve
+                    // 1.5 loops = 3PI = -PI position (West side)
+                    const exitPos = this.group.position.clone();
+                    
+                    // Target: Hover point above pad
+                    const hoverPos = this.landingPos.clone().add(new THREE.Vector3(0, 30, 0));
+                    
+                    // Curve East (Right) for return
+                    this.flightCurve = this.generateCurve(exitPos, hoverPos, 20, 60);
+                    this.flightProgress = 0;
+                    this.flightDuration = 20; 
+                }
+                break;
+
+            case 'APPROACH':
+                this.flightProgress += delta / this.flightDuration;
+                if (this.flightProgress >= 1) {
+                    this.flightProgress = 1;
+                    this.state = 'LANDING';
+                    this.gimbal.rotation.set(0,0,0);
+                } else if (this.flightCurve) {
+                    const t = this.flightProgress;
+                    const pos = this.flightCurve.getPoint(t);
+                    if (pos) {
+                        this.group.position.copy(pos);
+                        const tangent = this.flightCurve.getTangent(t).normalize();
+                        this.group.lookAt(pos.clone().add(tangent));
+                    }
+                    
+                    // Pitch down for speed, start leveling near end
+                    const targetPitch = t > 0.8 ? -0.1 : 0.2; 
+                    this.body.rotation.x = THREE.MathUtils.lerp(this.body.rotation.x, targetPitch, delta * 2);
+                    this.body.rotation.z = THREE.MathUtils.lerp(this.body.rotation.z, -0.2, delta * 2); // Right bank
                 }
                 break;
 
             case 'LANDING':
-                const landDuration = 10;
-                const landT = Math.min(1, this.timer / landDuration);
+                // Vertical Descent
+                const distY = this.group.position.y - this.landingPos.y;
+                const descentSpeed = distY > 10 ? 8 : 2; // Slow down near ground
                 
-                // Lerp pos back to helipad
-                const currentPos = this.group.position;
-                const targetX = this.landingPos.x;
-                const targetZ = this.landingPos.z;
-                const targetY = this.landingPos.y;
+                this.group.position.y -= delta * descentSpeed;
                 
-                // Simple linear approach for X/Z, Ease for Y
-                // We need to capture start pos at state transition for smooth lerp, 
-                // but for simplicity we'll drift towards it
+                // Align to Pad (North)
+                const northPt = this.group.position.clone().add(new THREE.Vector3(0,0,-100));
                 
-                const driftSpeed = 15 * delta;
-                const dy = (targetY - currentPos.y) * delta * 0.5; // Soft landing
-                
-                currentPos.x += (targetX - currentPos.x) * delta * 0.8;
-                currentPos.z += (targetZ - currentPos.z) * delta * 0.8;
-                
-                // Handle height
-                if (Math.abs(currentPos.x - targetX) < 5 && Math.abs(currentPos.z - targetZ) < 5) {
-                    // Close enough to descend
-                    currentPos.y += (targetY - currentPos.y) * delta * 0.8;
-                }
+                // Gentle rotation alignment
+                const currentQ = this.group.quaternion.clone();
+                this.group.lookAt(northPt);
+                const targetQ = this.group.quaternion.clone();
+                this.group.quaternion.copy(currentQ.slerp(targetQ, delta * 2));
 
-                // Level out
-                this.body.rotation.z *= 0.95;
-                this.body.rotation.x *= 0.95;
-                this.group.lookAt(targetX, currentPos.y, targetZ + 100); // Face Northish
+                // Flare (Nose Up) to stop, then level
+                const flare = distY > 5 ? -0.15 : 0;
+                this.body.rotation.x = THREE.MathUtils.lerp(this.body.rotation.x, flare, delta * 3);
+                this.body.rotation.z = THREE.MathUtils.lerp(this.body.rotation.z, 0, delta * 3);
 
-                if (Math.abs(currentPos.y - targetY) < 0.1) {
+                if (distY < 0.1) {
                     this.group.position.copy(this.landingPos);
                     this.state = 'COOLDOWN';
                     this.timer = 0;
@@ -378,9 +430,9 @@ class NewsHelicopter {
 // --- NEWS TOWER ---
 const createNewsTower = (scene) => {
     const group = new THREE.Group();
-    // Location: 5th Ave Corridor
-    const tx = -45;
-    const tz = -100;
+    // Location: 5th Ave Corridor (Moved to inside of bend)
+    const tx = -55;
+    const tz = -215;
     group.position.set(tx, 0, tz);
 
     const h = 45;
@@ -2344,8 +2396,6 @@ class SpaceNeedle {
         });
         this.rotatingGroup.add(this.rotatingGlassMesh);
 
-        this.group.add(this.rotatingGroup);
-
         this.elevators = [
             new Elevator(60, NEEDLE_PALETTE.ELEVATOR_BLUE, 0, this.group, audioGenerator),
             new Elevator(180, NEEDLE_PALETTE.ELEVATOR_YELLOW, 2, this.group, audioGenerator),
@@ -2560,10 +2610,8 @@ export function createEnvironment(scene, audioGenerator) {
 
       for(let i=0; i<relevantTrackPoints.length; i++) {
           const p = relevantTrackPoints[i];
-          if (!p) continue;
-          
-          if (typeof p.x === 'undefined' || typeof p.z === 'undefined') continue;
-          if (typeof v.x === 'undefined' || typeof v.z === 'undefined') continue;
+          if (!p || typeof p.x === 'undefined' || typeof p.z === 'undefined') continue;
+          if (!v || typeof v.x === 'undefined' || typeof v.z === 'undefined') continue;
 
           const dx = p.x - v.x;
           const dz = p.z - v.z;

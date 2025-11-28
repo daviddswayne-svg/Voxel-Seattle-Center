@@ -104,7 +104,6 @@ class SoundGenerator {
         }
 
         // 2. SNARE (Backbeat) - Hits at 0.5, 1.5
-        // We simulate a snare by checking if we are close to 0.5 or 1.5 within the 2s loop
         const barT = t % 2.0; 
         let snare = 0;
         let snareT = -1;
